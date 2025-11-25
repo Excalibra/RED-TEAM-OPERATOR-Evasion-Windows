@@ -1,0 +1,8 @@
+//https://docs.microsoft.com/en-us/dotnet/framework/performance/controlling-logging
+
+(as admin):
+logman start clrevents -p Microsoft-Windows-DotNETRuntime 0x1CCBD 0x5 -ets -ct perf
+
+logman stop clrevents -ets
+
+tracerpt clrevents.etl
