@@ -345,8 +345,8 @@ C: \rto\Tools\si\strings.exe -accepteula implant.exe | findstr /i Virt
 
    - Observe entropy spikes indicating encrypted regions
      <img width="839" height="495" alt="image" src="https://github.com/user-attachments/assets/a8d008f9-c034-4788-a760-60e3a93b6071" />
-
-So from this, we actually don't see our encrypted payloads. So let's rename implant.exe as implant-small.exe and let's change our payload to something bigger.
+	 
+	 So from this, we actually don't see our encrypted payloads. So let's rename implant.exe as implant-small.exe and let's change our payload to something bigger.
 
 ### 5. Payload Optimization
 
