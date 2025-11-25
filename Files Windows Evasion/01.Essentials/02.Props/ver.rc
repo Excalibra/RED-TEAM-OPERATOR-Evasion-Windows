@@ -1,0 +1,28 @@
+
+1 VERSIONINFO
+FILEVERSION 10,0,17763,475
+PRODUCTVERSION 10,0,17763,475
+FILEOS 0x40004
+FILETYPE 0x2
+{
+BLOCK "StringFileInfo"
+{
+	BLOCK "040904B0"
+	{
+		VALUE "CompanyName", "Microsoft Corporation"
+		VALUE "FileDescription", "Windows NT BASE API Client DLL"
+		VALUE "FileVersion", "10.0.17763.475 (WinBuild.160101.0800)"
+		VALUE "InternalName", "kernel32"
+		VALUE "LegalCopyright", "\xA9 Macrohard Corporation. All rights reserved."
+		VALUE "OriginalFilename", "kernel32"
+		VALUE "ProductName", "Microsoft\xAE Windows\xAE Operating System"
+		VALUE "ProductVersion", "10.0.17763.475"
+	}
+}
+
+BLOCK "VarFileInfo"
+{
+	VALUE "Translation", 0x0409 0x04B0  
+}
+}
+
