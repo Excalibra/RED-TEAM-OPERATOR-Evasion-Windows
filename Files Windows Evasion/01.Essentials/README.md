@@ -1,4 +1,4 @@
-# Essentials
+<img width="692" height="385" alt="image" src="https://github.com/user-attachments/assets/fb0209c8-6419-4d0d-82b4-72f1f09d2326" /># Essentials
 
 <details>
 <summary>01 - Modern Detection Technology </summary>
@@ -236,7 +236,7 @@ Security products employ entropy analysis to:
 
 ## Development Environment Setup
 
-[implant.cpp File](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/blob/main/Files%20Windows%20Evasion/01.Essentials/01.Entropy/implant.cpp)
+[01.entropy](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/01.Essentials/01.entropy)
 
 
 ## Development Environment Setup
@@ -675,4 +675,147 @@ This method provides exactly the same information, however it allows you to edit
 
 This method is particularly effective because it's quick, doesn't require recompilation, and can borrow credible version information from trusted system files.
 
+</details>
+
+
+<details>
+<summary>05 - Binary Signature</summary>
+
+## Overview
+
+Digital signatures are a standard security feature in Windows 10+ environments. Most legitimate binaries are signed by Microsoft or trusted Certificate Authorities (CAs). Adding signatures to malicious binaries enhances their appearance of legitimacy and can help evade automated detection mechanisms.
+
+## The Signature Problem
+
+When examining a legitimate system binary like `kernel32.dll`:
+
+<img width="543" height="648" alt="image" src="https://github.com/user-attachments/assets/6512121f-121e-4d6d-9ee5-611abd4dbc11" />
+
+You can see:
+- **Digital Signature** tab present
+- **Valid certificate path** with intermediate and root CAs
+- **Microsoft root certificate**
+
+Compare this to our compiled implant (even with module details):
+
+<img width="455" height="206" alt="image" src="https://github.com/user-attachments/assets/ab8145b0-272d-4ac4-ba4c-7874d24f0697" />
+
+<img width="692" height="385" alt="image" src="https://github.com/user-attachments/assets/2d66912e-4aa2-4bc3-86aa-9daf027759c5" />
+
+- **No Digital Signature tab**
+- **Missing certificate information**
+
+## Solution: Self-Signed Certificates
+
+### Tools Required
+- **makecert.exe** - Certificate creation tool
+- **pvk2pfx.exe** - Certificate format converter  
+- **signtool.exe** - Binary signing tool
+
+### Step-by-Step Process
+
+#### 1. Generate Root Certificate Authority (CA)
+
+Open x64 Native Tools Command Prompt for VS:
+
+```batch
+makecert -r -pe -n "CN = Microsoft Root Certificate Authority 2010,O = Microsoft Corporation,L = Redmond,S = Washington,C = US" -ss CA -sr CurrentUser -a sha256 -cy authority -sky signature -sv CA.pvk CA.cer
+```
+- `-r` - Self-signed certificate (root CA)
+- `-sv` - Specify private key file
+- Creates: `CA.pvk` (private key) and `CA.cer` (certificate)
+- We can skip setting the password:
+  <img width="776" height="409" alt="image" src="https://github.com/user-attachments/assets/d3924284-c8f1-449c-940a-39669ebd7f96" />
+  <img width="1210" height="606" alt="image" src="https://github.com/user-attachments/assets/8d4aebba-5946-44bf-befc-234c15d2e20f" />
+
+
+#### 2. Create Code Signing Certificate
+```batch
+# Self signed cert using our CA.pvk:
+
+makecert -pe -n "CN=Microsoft Windows Production PCA 2011,O = Microsoft Corporation,L = Redmond,S = Washington,C = US" -a sha256 -cy end -sky signature -eku 1.3.6.1.5.5.7.3.3,1.3.6.1.4.1.311.10.3.24,1.3.6.1.4.1.311.10.3.6 -ic CA.cer -iv CA.pvk -sv SPC.pvk SPC.cer
+```
+EKU (`-eku` means Enhanced Key Usage. This is a field in a certificate stating for what purposes of this certificate has been issued for.
+
+**Enhanced Key Usage (EKU) Options:**
+- `1.3.6.1.5.5.7.3.3` - Code Signing
+- `1.3.6.1.4.1.311.10.3.6` - Protected Process Verification  
+- `1.3.6.1.4.1.311.10.3.22` - Windows System Component Verification
+
+*Note: The last two EKUs are optional and can be removed if not needed.*
+
+<img width="1215" height="525" alt="image" src="https://github.com/user-attachments/assets/106c315b-1713-45eb-bfc7-dc64b2037f5c" />
+
+#### 3. Convert to PFX Format
+```batch
+Convert to PFX:
+
+pvk2pfx -pvk SPC.pvk -spc SPC.cer -pfx SPC.pfx
+```
+
+#### 4. Sign the Binary
+
+Tip: Before signing, we could create a copy of `implant.exe` and rename it as `implant-original.exe`.
+
+```batch
+Sign binary:
+
+signtool sign /v /f SPC.pfx <executable>
+```
+
+<img width="881" height="355" alt="image" src="https://github.com/user-attachments/assets/3667cd4a-517e-46d5-8c7a-74264eb40180" />
+
+
+## Verification
+
+After signing, check the binary properties:
+
+<img width="865" height="637" alt="image" src="https://github.com/user-attachments/assets/ff02fd49-2eff-4bc5-b3d2-fb48aba29324" />
+<img width="852" height="608" alt="image" src="https://github.com/user-attachments/assets/296604b4-0821-4e02-9fad-f0f73d80a5cc" />
+<img width="847" height="605" alt="image" src="https://github.com/user-attachments/assets/0063953f-4981-4974-9c99-fb4c56a4a84a" />
+
+You should now see:
+- **Digital Signatures tab** present
+- **Certificate information** displayed
+- **Root certificate not trusted** (expected for self-signed)
+
+## Complete Batch File Example
+
+[commands.txt](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/blob/main/Files%20Windows%20Evasion/01.Essentials/03.signing/commands.txt)
+
+## Operational Considerations
+
+### Trust Limitations
+- **Self-signed certificates** show as "not trusted" by default
+- **Installing root CA** on target machines is noisy and detectable
+- **Commercial code signing certificates** are paid and tracked
+
+### Detection Evasion Value
+- **Automated scanning**: May bypass basic signature checks
+- **User inspection**: Appears more legitimate in properties
+- **Heuristic analysis**: Matches patterns of signed software
+
+### Real-World Usage
+- Primarily effective against automated detection systems
+- Less effective against manual analysis by incident responders
+- Should be combined with other evasion techniques (entropy management, module details)
+
+## Advanced Notes
+
+### Certificate Spoofing
+In real operations, threat actors may:
+- Use stolen code signing certificates from legitimate companies
+- Exploit certificate issuance vulnerabilities
+- Use time-stamping to extend signature validity
+
+### Enterprise Considerations
+- Many organizations trust specific enterprise CAs
+- Internal code signing certificates may be trusted domain-wide
+- Certificate pinning may be used by advanced security products
+
+## Summary
+
+While self-signed signatures won't fool experienced analysts, they complement other evasion techniques by making binaries appear more legitimate to automated scanning systems and basic inspection.
+
+---
 </details>
