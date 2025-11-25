@@ -108,6 +108,25 @@ This repository provides practical implementations targeting these detection sys
 <details>
 <summary>2. Evasion Development Rules </summary>
 
+## Attacking assumptions:
+- Data availability
+- Data Consistency
+- Data communication
+
+by:
+- Disabling agent
+- disrupting comms
+- Exploiting blind spots
+- Blending in
+
+Considerations:
+- Offline VMs/infrastructure
+- Software access (local vs cloud)
+- Bypass development vs testing
+- Performing attacks vs observable detections
+- Privileged access vs non-admin
+- Decision paths
+
 ## Core Principles
 
 ### Privilege-Based Strategy
