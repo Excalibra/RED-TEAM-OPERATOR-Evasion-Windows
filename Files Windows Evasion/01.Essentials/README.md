@@ -1,7 +1,7 @@
 # Essentials
 
 <details>
-<summary>1. Modern Detection Technology </summary>
+<summary>01 - Modern Detection Technology </summary>
 
 <img width="917" height="517" alt="image" src="https://github.com/user-attachments/assets/90169b7e-5fc0-44d1-99cf-70d4809f4dda" />
 
@@ -106,7 +106,7 @@ This repository provides practical implementations targeting these detection sys
 
 
 <details>
-<summary>2. Evasion Development Rules </summary>
+<summary>02 - Evasion Development Rules </summary>
 
 ## Attacking assumptions:
 - Data availability
@@ -212,7 +212,7 @@ Testing environment acknowledges certain gaps:
 </details>
 
 <details>
-<summary>3. Binary Entropy in Malware Detection</summary>
+<summary>03 - Binary Entropy in Malware Detection</summary>
 
 ## Overview
 
@@ -574,7 +574,12 @@ hybrid.exe
 - Consider target environment specifics
 - Iterate based on detection results
 
-
 ---
+
+</details>
+
+
+<details>
+<summary>04 - Module Details </summary>
 
 </details>
