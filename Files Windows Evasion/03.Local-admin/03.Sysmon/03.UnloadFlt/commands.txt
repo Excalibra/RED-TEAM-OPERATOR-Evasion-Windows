@@ -1,0 +1,7 @@
+https://docs.microsoft.com/en-us/windows-hardware/drivers/ifs/allocated-altitudes
+
+altitude change (reboot needed):
+(as admin) reg add "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Instances\Sysmon Instance" /v Altitude /t REG_SZ /d 320832 /f
+
+revert:
+(admin) reg add "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Instances\Sysmon Instance" /v Altitude /t REG_SZ /d 385201 /f
