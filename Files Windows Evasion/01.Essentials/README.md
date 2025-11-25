@@ -103,3 +103,91 @@ This repository provides practical implementations targeting these detection sys
 
 ---
 </details>
+
+
+<details>
+<summary>2. Evasion Development Rules </summary>
+
+## Core Principles
+
+### Privilege-Based Strategy
+Evasion capabilities are directly tied to privilege levels:
+
+- **High Privileges (HiPrivs)**: Enable agent disablement, removal, or communication disruption
+- **Low Privileges**: Require exploitation of security solution blind spots and benign process mimicry
+
+### Fundamental Assumptions
+Evasion techniques target core assumptions made by EPP/EDR solutions:
+- **Data Availability**: Security solutions require access to system data
+- **Data Consistency**: Reliance on predictable system behavior and data structures
+- **Inter-Component Communication**: Dependence on internal and external communication channels
+
+## Testing Methodology
+
+### Environment Setup
+
+#### Isolation Requirements
+- **Primary Rule**: Maintain offline testing environments to prevent accidental data exfiltration to vendors
+- **Exception**: Cloud security solution testing requires controlled online access
+- **Communication Testing**: Specific scenarios may require network connectivity for disruption testing
+
+#### Infrastructure Recommendations
+- **Development VM**: For creating and compiling evasion techniques
+- **Testing VM**: For executing and evaluating evasion effectiveness
+- **Single-Machine Alternative**: Possible with proper security solution exceptions configured
+
+### Security Product Selection
+
+#### Bitdefender as AV Example
+- **Industry Prevalence**: Engine used by multiple third-party AV products
+- **Technique Coverage**: Implements typical AV/EDR methods including post-exploitation detection
+- **Research Focus**: Not product-specific bypassing, but technique development and validation
+
+#### Sysmon as EDR Simulator
+- **Wide Adoption**: Popular free solution with extensive logging capabilities
+- **Configurable Stealth**: Capable of hiding artifacts through renaming and configuration
+- **Realistic Methods**: Employs techniques used by commercial EDR solutions
+
+### Testing Process
+1. **Execute Evasion Techniques**: Implement developed methods in controlled environment
+2. **Observe Detection Impact**: Monitor security solution behavior and alerting
+3. **Validate Effectiveness**: Confirm whether targeted detections are successfully bypassed
+4. **Privilege Assessment**: Evaluate which methods are operationally feasible based on access level
+
+## Operational Considerations
+
+### EDR Hardening Challenges
+Commercial EDR solutions implement additional protection measures:
+
+- **Protected Processes (PPL)**: Restrict user-space access to security processes
+- **Secure Installation**: Require tokens or passwords for agent deployment
+- **Kernel-Level Protections**: Some defenses require kernel access to bypass
+
+### Realism Limitations
+Testing environment acknowledges certain gaps:
+
+- **Machine Learning Components**: Cloud-based EDR ML detection not fully replicated
+- **Advanced Protections**: Commercial EDR hardening features not present in test tools
+- **Adaptability**: Techniques require adjustment for specific target environments
+
+## Development Resources
+
+### Reference Material
+- **Jackson T's EDR Testing Series**: Comprehensive methodology for security solution evaluation
+- **Vendor Documentation**: Product-specific capabilities and limitations
+- **Community Research**: Ongoing evasion technique development and sharing
+
+## Implementation Strategy
+
+### Decision Framework
+- **Privilege-Based Pathing**: Select techniques based on available access levels
+- **Progressive Testing**: Build from basic to advanced evasion methods
+- **Environment-Specific Adaptation**: Tailor techniques to target security stack
+
+### Long-Term Development
+- **Technique Generalization**: Focus on concepts applicable across multiple security products
+- **Continuous Validation**: Regular testing against updated security solutions
+- **Operational Integration**: Bridge between research and practical engagement use
+
+---
+</details>
