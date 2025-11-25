@@ -426,14 +426,8 @@ Now at least it looks random and not a constant line. It's a little bit better b
 #### File Concatenation Methods
 
 **Option 1: Image Concatenation**
-```batch
-# Combine with JPEG image
-copy /b implant_text.exe + background.jpg output.jpg
 
-# Verify combined file works
-output.jpg
-```
-But this also depends on the image:
+This depends on the image:
 
 <img width="940" height="465" alt="image" src="https://github.com/user-attachments/assets/2709fb95-2ecb-43f6-ba79-677bdcfbc742" />
 <img width="587" height="463" alt="image" src="https://github.com/user-attachments/assets/7ee2a3db-2619-4bcf-b3ec-9f62aede41d0" />
@@ -443,18 +437,45 @@ Modern.IE is just a blue background and the chart is very different and nothing 
 <img width="932" height="460" alt="image" src="https://github.com/user-attachments/assets/afc1c564-9df7-470c-ae01-99a63b936fcd" />
 <img width="588" height="464" alt="image" src="https://github.com/user-attachments/assets/b7d47a47-3cab-4534-81fd-5f636ad9cac7" />
 
-Image No.3 we see there is almost super high enthropy through the whole file:
+Image No.3 `s7bg.jpg` we see there is almost super high enthropy through the whole file, which is from an image that has a lot more visual:
 
 <img width="778" height="499" alt="image" src="https://github.com/user-attachments/assets/a0710d88-eda1-4c98-8caf-6a3c78798bf6" />
+
+```batch
+copy c: \BGinfo\s7bg.jpg a.jpg
+
+# Combine with JPEG image
+type implant-text.exe >> a.jpg
+
+# Verify combined file
+a.jpg
+```
+
+<img width="393" height="116" alt="image" src="https://github.com/user-attachments/assets/ca58e2dc-7690-45a3-83c6-48b2c64c13c9" />
+
+<img width="179" height="156" alt="image" src="https://github.com/user-attachments/assets/d557f096-1ee7-4c04-a688-5b01ad24f312" />
+
+<img width="859" height="498" alt="image" src="https://github.com/user-attachments/assets/754dba06-2d6a-49d5-a781-d19931e589a9" />
+
+The large dip in the chart are the PE headers, and it looks better than what we had previously.
+
 
 **Option 2: Binary Concatenation**
 ```batch
 # Combine with legitimate binary
-copy /b implant_text.exe + kernel32.dll combined.exe
+copy implant-data.exe bin.exe
+
+type c:\windows\system32\kernel32.dll >> bin.exe
 
 # Test functionality
-combined.exe
+bin.exe
 ```
+
+<img width="489" height="298" alt="image" src="https://github.com/user-attachments/assets/3e2ce6d2-7870-4d82-aaf0-8e632d1ed8cd" />
+
+<img width="920" height="464" alt="image" src="https://github.com/user-attachments/assets/de205398-0c82-4c64-8c00-358f91f13089" />
+
+This is very effective way as a quick fix for any detection based on entropy. This is really effective against some EDRs.
 
 #### Resource Section Embedding
 ```cpp
