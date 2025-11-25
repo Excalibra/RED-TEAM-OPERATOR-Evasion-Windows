@@ -1,4 +1,4 @@
-<img width="692" height="385" alt="image" src="https://github.com/user-attachments/assets/fb0209c8-6419-4d0d-82b4-72f1f09d2326" /># Essentials
+# Essentials
 
 <details>
 <summary>01 - Modern Detection Technology </summary>
