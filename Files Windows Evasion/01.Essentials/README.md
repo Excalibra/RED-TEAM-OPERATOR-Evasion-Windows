@@ -350,8 +350,6 @@ C: \rto\Tools\si\strings.exe -accepteula implant.exe | findstr /i Virt
 
 ### 5. Payload Optimization
 
-#### Moving Payload to Text Section
-
 There's a sample encrypted message shellcode, but compiled and encrypted as a reflective DLL:
 
 <img width="932" height="318" alt="image" src="https://github.com/user-attachments/assets/15e43612-af1a-40ff-9401-d105f7cfda1d" />
@@ -381,6 +379,48 @@ Let's rename the file to implant-data.exe:
 
 <img width="179" height="121" alt="image" src="https://github.com/user-attachments/assets/49c01054-fea1-4105-bd9b-75b2fa301370" />
 
+Entropy chart of implant-data.exe:
+
+<img width="933" height="467" alt="image" src="https://github.com/user-attachments/assets/011f1bf9-02e8-4dec-90d6-939a021b1940" />
+
+The horizontal line on the chart shows our payload, as it stands out very clearly here:
+
+<img width="746" height="497" alt="image" src="https://github.com/user-attachments/assets/0988184b-b7b1-4257-ad97-d21a9d48af85" />
+
+What can be done? We can try to move that payload into the text section, so the easiest way is just to put it on stack.  
+
+#### Moving Payload to Text Section
+
+Move this section:
+```batch
+unsigned char payload[] = {...};
+unsigned char key[] = {...};
+
+unsigned int payload_len = sizeof(payload);
+```
+
+Place it on stack under `int main(void)	{`:
+
+<img width="1658" height="728" alt="image" src="https://github.com/user-attachments/assets/1ca611f7-67b7-4487-a98a-797ece9b56e5" />
+
+Compile it again using `compile.bat`:
+
+<img width="290" height="166" alt="image" src="https://github.com/user-attachments/assets/ffb6f0c3-9f51-4bd6-a277-3b0eacd9164a" />
+
+Check to see if it works:
+
+<img width="454" height="215" alt="image" src="https://github.com/user-attachments/assets/2a3c6b3a-b30d-4b1c-99d2-92a15720ef1f" />
+
+Rename it to `implant-text.exe`:
+
+<img width="169" height="109" alt="image" src="https://github.com/user-attachments/assets/bc66c569-079a-4f32-aed6-53e6de1c2df1" />
+
+<img width="843" height="501" alt="image" src="https://github.com/user-attachments/assets/474a7dc6-cbfb-4d86-80e3-f83def7d883e" />
+<img width="885" height="262" alt="image" src="https://github.com/user-attachments/assets/17c5bd72-285d-4728-a5db-203a74cd6d81" />
+
+
+Now at least it looks random and not a constant line. It's a little bit better but there is something else we can do.  
+
 ### 6. Advanced Entropy Camouflage
 
 #### File Concatenation Methods
@@ -393,6 +433,19 @@ copy /b implant_text.exe + background.jpg output.jpg
 # Verify combined file works
 output.jpg
 ```
+But this also depends on the image:
+
+<img width="940" height="465" alt="image" src="https://github.com/user-attachments/assets/2709fb95-2ecb-43f6-ba79-677bdcfbc742" />
+<img width="587" height="463" alt="image" src="https://github.com/user-attachments/assets/7ee2a3db-2619-4bcf-b3ec-9f62aede41d0" />
+
+Modern.IE is just a blue background and the chart is very different and nothing random here, with blue colour as the entire image:
+
+<img width="932" height="460" alt="image" src="https://github.com/user-attachments/assets/afc1c564-9df7-470c-ae01-99a63b936fcd" />
+<img width="588" height="464" alt="image" src="https://github.com/user-attachments/assets/b7d47a47-3cab-4534-81fd-5f636ad9cac7" />
+
+Image No.3 we see there is almost super high enthropy through the whole file:
+
+<img width="778" height="499" alt="image" src="https://github.com/user-attachments/assets/a0710d88-eda1-4c98-8caf-6a3c78798bf6" />
 
 **Option 2: Binary Concatenation**
 ```batch
