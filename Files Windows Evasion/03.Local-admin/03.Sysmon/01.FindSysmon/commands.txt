@@ -1,0 +1,36 @@
+Detecting Sysmon:
+
+process:
+Get-Process | Where-Object { $_.ProcessName -eq "Sysmon" }
+
+service:
+Get-CimInstance win32_service -Filter "Description = 'System Monitor service'"
+Get-Service | where-object {$_.DisplayName -like "*sysm*"}
+
+Sysinternals EULA:
+reg query "HKCU\Software\Sysinternals\System Monitor"
+
+ETW Providers:
+logman query providers | findstr /i sysm
+
+
+(as admin)
+minifilters (default Sysmon altitude: 385201):
+fltmc
+
+
+-------
+effective detection:
+
+Event channels:
+reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-Sysmon/Operational
+
+Publisher:
+reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Publishers\{5770385F-C22A-43E0-BF4C-06F5698FFBD9}"
+
+ETW Providers:
+logman query providers {5770385F-C22A-43E0-BF4C-06F5698FFBD9}
+reg query "HKLM\SYSTEM\CurrentControlSet\Services\onedrv\Parameters"
+
+(as admin):
+fltmc instances
