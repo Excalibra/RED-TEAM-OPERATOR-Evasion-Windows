@@ -580,6 +580,99 @@ hybrid.exe
 
 
 <details>
-<summary>04 - Module Details </summary>
+<summary>04 - Module Details Obfuscation </summary>
+
+## Overview
+
+Filling out PE module details is a crucial step in making malicious binaries appear legitimate. This technique addresses the metadata analysis performed by security products and user inspection through file properties.
+
+## The Problem: Empty Module Details
+
+When you compile the basic implant:
+```batch
+cd 02.props
+compile.bat
+implant.exe
+```
+
+The resulting `implant.exe` has completely empty properties:
+
+<img width="265" height="184" alt="Empty module details" src="https://github.com/user-attachments/assets/20fe086f-52e8-46c8-ad71-f77d16e69f11" />
+
+Compare this to legitimate system files like `kernel32.dll` which have complete details:
+
+<img width="987" height="733" alt="Kernel32 details" src="https://github.com/user-attachments/assets/a77702e6-ad94-4e04-a052-bea5e19f2f23" />
+
+## Solution: Using Resource Hacker
+
+### Step 1: Open Resource Hacker
+- Launch Resource Hacker
+- Open your `implant.exe` file
+
+### Step 2: Import Version Resources
+1. Go to **Action** menu
+2. Select **Add a Resource...** or **Add from Resource File...**
+<img width="795" height="374" alt="image" src="https://github.com/user-attachments/assets/8746c945-de51-4b3b-a8ce-e51de071e8fc" />
+   
+3. Browse to a legitimate file (e.g., `C:\Windows\System32\kernel32.dll`)
+   <img width="1361" height="633" alt="image" src="https://github.com/user-attachments/assets/db11cd0e-9859-46c9-9c89-d10ceba5ae31" />
+
+4. Select the **Version** resource type
+5. Click **Add** to import the version information
+   <img width="443" height="581" alt="image" src="https://github.com/user-attachments/assets/7573a95e-1eaa-493b-be9b-dbbdcdbb3693" />
+
+
+### Step 3: Save Modified Binary
+
+- Use **File → Save As** to create a new binary (e.g., `implant_modified.exe`)
+- Or use **File → Save** to overwrite the original
+
+## Verification
+
+After using Resource Hacker, check the properties again:
+- Right-click the modified binary → **Properties** → **Details**
+- You should now see complete version information imported from the source file
+- `implant_original.exe` is the original, and the `implant.exe` is the one modified with Resource Hacker. You can see the difference with details that came from `kernel32.dll`:
+
+<img width="1010" height="672" alt="image" src="https://github.com/user-attachments/assets/3b543a98-f3d1-4ddc-9f8a-d16e871cf8b4" />
+
+We can rename the new modified binary to `implant-reshak.exe`.
+
+## Alternative Method: Compile with Version Resources
+
+An alternative method is using compilation with version resources, but the primary demonstration uses Resource Hacker for simplicity and immediate results.
+
+```batch
+compileVer.bat
+```
+
+<img width="459" height="124" alt="image" src="https://github.com/user-attachments/assets/14b49a3f-5b1d-4e29-b2a0-c52b95666b9c" />
+
+<img width="1038" height="795" alt="image" src="https://github.com/user-attachments/assets/e30ffa94-7fbd-48c5-847f-32b5119148de" />
+
+Here we can see it says Macrohard Corporation instead of Microsoft as a demonstration.
+
+<img width="790" height="180" alt="image" src="https://github.com/user-attachments/assets/d040af90-b06c-42ba-9b95-3d560c37b422" />
+
+Within `compileVer.bat` we are using a resource compiler using an input file, our RC file, and then it's being translated into the object image for it to link together with our implant. 
+
+The resource file was extracted using Resource Hacker `ver.rc`:
+
+<img width="577" height="388" alt="image" src="https://github.com/user-attachments/assets/a620d3d4-ab38-4b2f-8749-c56dc3f70db3" />
+
+This method provides exactly the same information, however it allows you to edit as much as you want. As mentioned previously, it's not the decisive factor in detection, however the more you make your binary, i.e make your file look legitimate, the higher chances that it's going to pass through the filters.
+
+## Benefits
+
+- **Detection Evasion**: Makes binaries appear more legitimate to security products
+- **Social Engineering**: Increases credibility if users inspect file properties
+- **Quick Implementation**: Resource Hacker provides immediate results without recompilation
+
+## Tools Required
+
+- **Resource Hacker**: Free resource editor available online
+- **Legitimate Reference File**: System file with complete version info (e.g., kernel32.dll)
+
+This method is particularly effective because it's quick, doesn't require recompilation, and can borrow credible version information from trusted system files.
 
 </details>
