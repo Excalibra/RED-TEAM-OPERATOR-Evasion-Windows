@@ -706,5 +706,426 @@ The step-by-step execution with debugger verification ensures that the unhooking
 
 <details>
 <summary>04 - Hooks vs Hells Gate</summary>
+  
+## Overview
+
+HellsGate is an advanced technique that dynamically resolves system call numbers at runtime, eliminating the need for hardcoded values that change between Windows versions. This method bypasses API hooks by making direct system calls while maintaining compatibility across different Windows releases.
+
+## The Problem: Changing Syscall Numbers
+
+System call numbers change with every Windows release:
+
+| Windows Version | NtCreateThread Syscall Number |
+|----------------|------------------------------|
+| Windows 7      | 0x4B                         |
+| Windows 10 1809| 0x4C                         |
+| Windows 10 1903| 0x4E                         |
+
+Hardcoding these values creates maintenance overhead and version dependency.
+
+One way to deal with this problem is to dynamically detect which version of windows our code is running on and then use specific system call numbers for that version. But this requires implementing a lot of redundant code. Smelly and Evansac implemented a technique called HellsGate which tries to resolve these system call numbers dynamically without a need to  hard code them inside your program.
+
+<img width="404" height="286" alt="image" src="https://github.com/user-attachments/assets/b9ae0a8b-bc84-49bd-a837-9dd311f31540" />
+
+[HellsGate PDF Documentation](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/blob/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/03.HellsGate/hells-gate.pdf)
+
+
+## Implementation Architecture
+
+### Core Components
+
+[01.Unhooks/03.HellsGate](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/03.HellsGate)
+
+#### 1. Assembly Stubs (HellsGate.asm)
+
+Let's examine the code, which has two main and most important components.
+
+The first is `hellsgate.asm`, a file containing two very simple assembly functions. One is named `HellsGate`, and the other is `HellDescent`.
+
+The `HellsGate` function performs a single, specific task: it takes a function parameter stored in the `ECX` register and copies its value into a global variable named `wSystemCall`.
+
+```nasm
+.data
+	wSystemCall DWORD 000h
+
+.code 
+	HellsGate PROC
+		mov wSystemCall, 000h
+		mov wSystemCall, ecx
+		ret
+	HellsGate ENDP
+
+	HellDescent PROC
+		mov r10, rcx
+		mov eax, wSystemCall
+
+		syscall
+		ret
+	HellDescent ENDP
+end
+```
+
+The second function, `HellDescent`, is essentially a system call stub. When this function is called, it executes the actual system call into the kernel. It does this by using the system call number stored in the global variable that was previously set by `HellsGate`. That is the core functionality of the assembly part.
+
+#### 2. Syscall Table Structure
+
+The second crucial component is the C code `main.c` file. This is slightly more complex, but not overwhelmingly so. The entire HellsGate technique relies on two tables—or, more precisely, one table and two corresponding data structures.
+
+<img width="1609" height="802" alt="image" src="https://github.com/user-attachments/assets/a0b543fb-c0c1-49df-8965-5c807fd5fed1" />
+
+The first structure is called the `VX_TABLE`, which is essentially an array of structures, each of type `VX_TABLE_ENTRY`.
+
+A `VX_TABLE_ENTRY` is composed of three elements:
+1.  **pAddress:** A pointer that holds the address of a function.
+2.  **Hash (dwHash):** A 64-bit integer that uniquely identifies that function.
+3.  **Syscall (wSystemCall):** The number corresponding to the system call for that function.
+
+In this particular implementation, the `VX_TABLE` is populated with information for only four critical system calls:
+*   `NtAllocateVirtualMemory`
+*   `NtProtectVirtualMemory`
+*   `NtCreateThreadEx`
+*   `NtWaitForSingleObject`
+
+An important principle to note here is that the HellsGate technique is designed to use functions exclusively from `ntdll.dll`. It intentionally does not rely on any additional DLLs, such as `kernel32.dll` or `user32.dll`, utilizing only `ntdll` to perform its operations.
+
+
+## Step-by-Step Implementation
+
+<img width="1609" height="803" alt="image" src="https://github.com/user-attachments/assets/cc543526-5f67-44a0-b64a-afe89e8e5603" />
+
+### Step 1: Locate ntdll.dll in Memory
+
+Now, why is this `VX_TABLE` so important? This table holds all the necessary information to call these four `Nt*` functions directly. However, to call them, we must first resolve their corresponding system call numbers.
+
+To find a specific system call number, we must parse the `ntdll.dll` that is loaded in memory. We obtain the address of `ntdll.dll` by utilizing the Process Environment Block (PEB). 
+
+<img width="1601" height="401" alt="image" src="https://github.com/user-attachments/assets/98a4f860-e22f-4971-9788-d105a8e75784" />
+
+The PEB contains a pointer to a doubly linked list called the In-Memory Order Module List, which holds all modules loaded in the process. The first module in this list is the process image itself, and the second is always `ntdll.dll`. By reading from this list, we get the base address of `ntdll.dll` in our process.
+
+### Step 2: Parse PE Headers for Export Directory
+
+The next step is to extract the Export Directory from `ntdll.dll`. This is done with a helper function `GetImageExportDirectory` that simply parses the PE headers to locate and return the export directory.
+
+<img width="1609" height="613" alt="image" src="https://github.com/user-attachments/assets/3db07920-2c8d-4030-b538-ee714e5cee45" />
+
+Once we have the export directory, we are ready to parse `ntdll.dll` and search for the system calls we are interested in.
+
+<img width="1614" height="687" alt="image" src="https://github.com/user-attachments/assets/8dff01fb-1a09-43ab-84a3-368edbc0964e" />
+
+For each of the four functions (e.g., `NtAllocateVirtualMemory`, `NtCreateThreadEx`, `NtProtectVirtualMemory` and `NtWaitForSingleObject`), we store a hash of the function name.  
+
+<img width="1607" height="579" alt="image" src="https://github.com/user-attachments/assets/f6932274-3522-43b0-9dfa-8ff9dfca1c12" />
+
+This implementation uses the `djb2` hash function, created by Daniel J. Bernstein.
+
+<img width="1614" height="709" alt="image" src="https://github.com/user-attachments/assets/5662d21f-815a-463e-a900-f8d9c699f776" />
+
+ <img width="1610" height="496" alt="image" src="https://github.com/user-attachments/assets/4c5aebec-65e1-4406-899f-17a2a4894b7b" />
+
+ ### Step 3: Resolve Function Addresses and Syscall Numbers
+ 
+We then call a function to locate this hash within the `ntdll.dll` export table. This function works by iterating through the Export Address Table in a loop, comparing the hash of each exported function name against the hash we are seeking. When a match is found, the address of that function is stored in our `VX_TABLE_ENTRY` structure.
+
+<img width="1606" height="711" alt="image" src="https://github.com/user-attachments/assets/55675f73-7980-43bb-be1c-53b6f0587c09" />
+
+
+### Step 4: Extract Syscall Number from Function Stub
+
+The final step is to find the system call number for that function. This is done in a subsequent loop `while (TRUE)` that searches for the specific byte sequence of the system call stub. 
+<img width="1610" height="698" alt="image" src="https://github.com/user-attachments/assets/79a0b24a-0f1b-47cd-9210-a4cd8423cf28" />
+
+The critical bytes we look for are:
+*   `4C 8B D1`, which translates to the assembly instruction `mov r10, rcx`.
+*   `B8`, which is the `mov eax, ...` opcode. The next four bytes after `B8` contain the system call number.
+    <img width="1612" height="807" alt="image" src="https://github.com/user-attachments/assets/a30d4015-2a22-42b8-85cc-e7b6685a9b8e" />
+
+
+When this specific byte signature is found, the two bytes representing the system call number are extracted and stored in the `wSystemCall` element of our structure.
+
+This process is repeated for all four functions. Once the `VX_TABLE` is fully populated, we call the payload function.
+
+### How the Payload Executes
+
+The payload function uses the two assembly functions, `HellsGate` and `HellDescent`, in the following pattern:
+
+1.  To call `NtAllocateVirtualMemory`, we first call `HellsGate` with the system call number as a parameter. This stores the number in a global variable.
+2.  Then, we call `HellDescent` with the exact same parameters that the real `NtAllocateVirtualMemory` function takes. Internally, `HellDescent` retrieves the system call number from the global variable and executes the `syscall` instruction.
+
+This two-step combo is used for all subsequent operations:
+*   We allocate virtual memory (`NtAllocateVirtualMemory`).
+*   We decrypt our payload (the familiar message box shellcode).
+*   We copy the decrypted payload, byte by byte, into the newly allocated memory region.
+*   We change the memory permissions from `PAGE_READWRITE` to `PAGE_EXECUTE_READ` using `NtProtectVirtualMemory`.
+*   Finally, we create a new thread with `NtCreateThreadEx` that runs our payload and use `NtWaitForSingleObject` to wait for it to finish.
+
+It's important to note that this example runs the shellcode within its own process, but the same technique can be used for injection into another process.
+
+## Debugger Analysis
+
+### Setting Up the Debug Environment
+
+The code includes a debug breakpoint for analysis:
+```cpp
+// Debug breakpoint - remove for production
+__debugbreak();
+```
+
+<img width="1608" height="717" alt="image" src="https://github.com/user-attachments/assets/7d3caf64-ee65-4a27-8ac6-bcb28c435808" />
+
+
+### Step-by-Step Debugging
+
+#### 1. Compile and Run
+
+After compiling and running the program under a debugger, it hits the breakpoint. We can then step through the code to observe the `VX_TABLE` being populated.
+
+```batch
+cd 03.HellsGate
+
+# building Hell's Gate:
+msbuild HellsGate.sln /t:Rebuild /p:Configuration=Release /p:Platform="x64"
+```
+<img width="1246" height="607" alt="image" src="https://github.com/user-attachments/assets/8f1386b5-5a74-4cec-9ee1-b761618e4b2e" />
+<img width="1233" height="611" alt="image" src="https://github.com/user-attachments/assets/225c88aa-af11-45fb-b61c-3d45a220efa2" />
+
+ <img width="375" height="231" alt="image" src="https://github.com/user-attachments/assets/5e4be979-261d-4583-8769-a4e9ee071f82" />
+
+
+#### 2. Debugger Analysis of Hash Resolution
+
+For demonstration, an `int 3` instruction (a hard-coded breakpoint) was added to the code. This requires running the program under a debugger.
+
+<img width="1608" height="795" alt="image" src="https://github.com/user-attachments/assets/d4f101be-573b-4189-8d88-f454c9bbd11a" />
+
+<img width="1611" height="800" alt="image" src="https://github.com/user-attachments/assets/a7e84705-4412-4cdd-8929-a8338e1eda4c" />
+
+<img width="1609" height="802" alt="image" src="https://github.com/user-attachments/assets/1d45ccce-2cc7-4674-8ae3-71ea43e0613e" />
+
+*   Stepping through the `get_vx_table_entry` function for `NtAllocateVirtualMemory`, we see it successfully finds the function address and its system call number, which is `0x18`. This can be verified in the debugger's symbol view for `ntdll.dll`.
+*   This process repeats for `NtCreateThreadEx`, whose system call number is found to be `0xbc`. By following its address in the disassembler, we confirm it points to the correct function.
+*   Once all four structures are filled, the `VX_TABLE` at its memory address contains all the resolved addresses and numbers.
+
+---
+
+Before we proceed, we need to remove the hardcoded `int 3` breakpoint instruction. To do this, we use the debugger's "Assemble" feature to overwrite the `int 3` opcode with a `NOP` (No Operation) instruction, which has no effect.
+
+<img width="1611" height="803" alt="image" src="https://github.com/user-attachments/assets/db10957d-dab2-46f0-b9f0-3c1edb13fb6e" />
+<img width="1607" height="797" alt="image" src="https://github.com/user-attachments/assets/916e18d0-c547-4eea-b85a-1905be41f6e6" />
+
+When the debug breakpoint hits, observe:
+- **RAX register** contains the hash value for the target function
+- **RCX register** holds ntdll base address
+- **RDX register** contains export directory pointer
+- **R8 register** points to the VX_TABLE_ENTRY structure
+
+Now, with the `RAX` register holding our target function hash, we see that the `R8` register holds a memory address. 
+
+<img width="1613" height="460" alt="image" src="https://github.com/user-attachments/assets/910ebbec-5c4a-49dd-a988-6f81e3896cf5" />
+
+Let's examine what's at that address in the memory dump.
+
+<img width="1603" height="545" alt="image" src="https://github.com/user-attachments/assets/26d32634-2323-43ed-903e-edf59f35931e" />
+
+As you can see, it already contains our hash value. Since `R8` is the third parameter for this function call, this address is a pointer to the `VX_TABLE_ENTRY` structure for `NtAllocateVirtualMemory`.
+
+<img width="1610" height="345" alt="image" src="https://github.com/user-attachments/assets/4a97aee9-60b9-481b-a6de-5fae43989234" />
+
+#### 3. Verifying Syscall Resolution
+
+After resolution, check the VX_TABLE_ENTRY structure:
+- **pAddress** field contains the function address in ntdll
+- **dwHash** field shows the precomputed hash
+- **wSystemCall** field contains the dynamically resolved syscall number
+ 
+<img width="1617" height="357" alt="image" src="https://github.com/user-attachments/assets/4314ece1-5df4-4feb-8bc7-40441eb73c6e" />
+
+---
+
+Example verification in debugger:
+```assembly
+; Check NtAllocateVirtualMemory resolution
+ntdll!NtAllocateVirtualMemory: 0x00007FFC04A31250
+Resolved Syscall: 0x0018
+```
+We will now step over the `get_vx_table_entry` function. Upon return, we can see the structure has been populated: an address is stored in the first element, and the system call number `0x18` is in the third.
+
+Let's verify this is correct. We can go to the symbols view for `ntdll.dll` and find `NtAllocateVirtualMemory`. Its system call number is indeed `0x18`, confirming our function worked and the first structure is filled.
+
+<img width="1681" height="813" alt="image" src="https://github.com/user-attachments/assets/325fa90c-b9e3-4019-9508-eaf42082ee6d" />
+<img width="1684" height="817" alt="image" src="https://github.com/user-attachments/assets/ad09c2c9-9ee4-4779-89d2-0e349fa137a3" />
+<img width="1679" height="808" alt="image" src="https://github.com/user-attachments/assets/794822c3-2535-4086-ba4c-920e1cfa0fe6" />
+<img width="1679" height="809" alt="image" src="https://github.com/user-attachments/assets/3f6d5c3b-22dc-4844-b919-63baf9d72512" />
+
+
+We then repeat this process for the next function, `NtCreateThreadEx`. Stepping over its population call, we see its system call number, `0xbc`, is stored. 
+
+<img width="1685" height="820" alt="image" src="https://github.com/user-attachments/assets/fc7c64ca-882f-4b04-94c8-7716265ce6af" />
+
+Instead of checking the symbols again, we can take the function address that was found and follow it in the disassembler.
+
+<img width="1682" height="817" alt="image" src="https://github.com/user-attachments/assets/a615a538-fa5b-4a9e-92c1-b028d572ed82" />
+
+This confirms it points to the correct `NtCreateThreadEx` function which is `B8 BC 000000`, proving the technique is working and the table is being filled correctly.
+ 
+<img width="1684" height="824" alt="image" src="https://github.com/user-attachments/assets/2e22fba6-45b5-47e0-a6d2-67331de6b998" />
+
+
+We let the program run to complete the population for all four structures. 
+
+<img width="578" height="82" alt="image" src="https://github.com/user-attachments/assets/5b11d6f4-f778-4175-af71-ed93f293d8f1" />
+<img width="581" height="117" alt="image" src="https://github.com/user-attachments/assets/c5d72050-314e-49bd-97bc-1810fe18f6f9" />
+ <img width="580" height="120" alt="image" src="https://github.com/user-attachments/assets/939c1be3-7056-458e-8f84-85121a5128a7" />
+<img width="576" height="119" alt="image" src="https://github.com/user-attachments/assets/e0eba020-4e22-4840-bfd9-b5df8ca9f4cd" />
+
+We can then inspect the final `VX_TABLE` at its memory address (`0xf99...`) to see all the resolved addresses and system call numbers.
+
+<img width="1444" height="644" alt="image" src="https://github.com/user-attachments/assets/c41034ba-631e-49a1-a426-5556870828c2" />
+<img width="1672" height="467" alt="image" src="https://github.com/user-attachments/assets/6e935185-14b2-4632-9fb7-8210bd79744b" />
+<img width="1678" height="731" alt="image" src="https://github.com/user-attachments/assets/a79e3e47-6616-4915-bfae-15ab2692e091" />
+
+
+### Stepping Through the Payload Execution
+
+The execution now proceeds to the payload function. We set a breakpoint at its entry and step into it and hit enter on the cmd.
+
+<img width="1685" height="809" alt="image" src="https://github.com/user-attachments/assets/c6c0cca9-99cb-4ff9-ad7e-a73d2f28119c" />
+<img width="1679" height="555" alt="image" src="https://github.com/user-attachments/assets/fb517c1f-5974-4df0-9f04-89935391595b" />
+
+The first operation is a `LoadLibrary` call, which is only necessary for our specific message box payload. The shellcode itself doesn't load this library, so we must ensure it's present in the process beforehand.
+
+<img width="1609" height="810" alt="image" src="https://github.com/user-attachments/assets/df665e0b-8342-47a1-bfe5-232276801d92" />
+
+
+After some diagnostic `printf` calls, we reach the core of the technique. We see the two values that correspond to our `HellsGate` and `HellDescent` functions. Let's examine the first call to `NtAllocateVirtualMemory`.
+
+<img width="1609" height="818" alt="image" src="https://github.com/user-attachments/assets/0f2b6d0c-0601-4ae0-9eed-89ab52812161" />
+<img width="1605" height="803" alt="image" src="https://github.com/user-attachments/assets/561c854e-d916-4feb-9516-dd6209e89180" />
+<img width="1611" height="683" alt="image" src="https://github.com/user-attachments/assets/cd0f3b36-8296-4d90-b63e-5cca102f2735" />
+
+
+1.  **Calling `HellsGate`:** The `HellsGate` function is called with a single parameter. We see the value `0x18` (the system call number for `NtAllocateVirtualMemory`) moved into the `ECX` register. Stepping into `HellsGate` shows this value being copied into the global variable.
+
+<img width="1609" height="800" alt="image" src="https://github.com/user-attachments/assets/4d15bdda-030b-40ee-946c-4711901edbf7" />
+
+This is from this code `hellsgate.asm`:
+
+<img width="1611" height="800" alt="image" src="https://github.com/user-attachments/assets/6826fc96-b01f-4d44-8959-b566d794cd61" />
+
+
+3.  **Calling `HellDescent`:** Immediately after, `HellDescent` is called. It is passed the same parameters that the real `NtAllocateVirtualMemory` function expects. Note that the second parameter (`RDX`) is a pointer to a variable that will receive the address of the newly allocated memory.
+
+<img width="1612" height="794" alt="image" src="https://github.com/user-attachments/assets/35c5b830-cb3f-40fa-8a81-0d28624f95ff" />
+
+Hit `enter`:
+
+<img width="1613" height="807" alt="image" src="https://github.com/user-attachments/assets/ae00761c-6ce2-4ac8-b1ae-658c0acb7345" />
+
+Stepping into `HellDescent`, we observe it retrieving the system call number `0x18` from the global variable, moving it into `EAX`, and executing the `syscall` instruction.
+
+<img width="1609" height="793" alt="image" src="https://github.com/user-attachments/assets/95ba664c-c173-47e2-adcf-93872fd05ab4" />
+
+After the system call returns and we step over, we can see that the memory address variable (pointed to by `RDX`) has been populated with a valid address. 
+
+We can verify this successful allocation by checking the process memory in a tool like Process Hacker, where a new, private commit memory page will be visible at this address. This confirms the entire HellsGate technique has executed successfully.
+
+<img width="1615" height="799" alt="image" src="https://github.com/user-attachments/assets/6ce52d97-1b49-4f01-a846-e6888ee9ea5b" />
+
+
+## Practical Usage
+
+### Making Direct Syscalls
+
+```cpp
+// Instead of calling VirtualAlloc, use:
+HellsGate(VxTable[0].wSystemCall);  // Set NtAllocateVirtualMemory syscall
+NTSTATUS status = HellDescent(
+    GetCurrentProcess(), 
+    &lpAddress, 
+    0, 
+    &dwSize, 
+    MEM_COMMIT | MEM_RESERVE, 
+    PAGE_READWRITE
+);
+```
+
+### Complete Injection Flow
+
+```cpp
+// 1. Allocate memory
+HellsGate(VxTable[0].wSystemCall);
+HellDescent(GetCurrentProcess(), &lpAddress, 0, &dwSize, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+
+// 2. Write payload
+memcpy(lpAddress, decryptedPayload, payloadSize);
+
+// 3. Change memory protection  
+HellsGate(VxTable[1].wSystemCall);
+HellDescent(GetCurrentProcess(), &lpAddress, &dwSize, PAGE_EXECUTE_READ, &oldProtect);
+
+// 4. Execute
+HellsGate(VxTable[2].wSystemCall);
+HellDescent(NULL, &hThread, THREAD_ALL_ACCESS, NULL, GetCurrentProcess(), lpAddress, NULL, FALSE, 0, 0, 0, NULL);
+```
+
+## Advantages
+
+- **Version Independent**: No hardcoded syscall numbers
+- **Bypasses Hooks**: Uses direct syscalls instead of hooked APIs
+- **Stealthy**: No suspicious API calls to monitor
+- **Reliable**: Works across Windows versions without modification
+
+## Limitations
+
+- **Complexity**: Requires understanding of PE structure and assembly
+- **Detection**: Some EDRs may monitor direct syscall usage patterns
+- **Maintenance**: Hash collisions possible if Microsoft adds functions with same hash
+
+## Advanced Considerations
+
+### Hash Collision Prevention
+The DJB2 hash algorithm used has a low collision rate, but for critical operations, consider:
+- Using a different hash algorithm
+- Adding length checks
+- Implementing fallback verification
+
+### Anti-Analysis Techniques
+- Remove debug breakpoints in production
+- Obfuscate hash values
+- Implement runtime integrity checks
+- Use multiple resolution methods as fallback
+
+## Verification Methods
+
+### Manual Verification
+```cpp
+// Verify resolved syscall numbers match expectations
+printf("NtAllocateVirtualMemory: 0x%X\n", VxTable[0].wSystemCall);
+printf("NtCreateThreadEx: 0x%X\n", VxTable[2].wSystemCall);
+```
+
+### Runtime Validation
+```cpp
+// Ensure syscall numbers are within expected range
+if (VxTable[0].wSystemCall < 0x0001 || VxTable[0].wSystemCall > 0x0FFF) {
+    // Potential detection or corruption
+    return -1;
+}
+```
+
+## Conclusion
+
+HellsGate provides a robust method for dynamic syscall resolution that effectively bypasses user-mode API hooks. By combining PE parsing, hash-based function resolution, and direct system calls, this technique offers a powerful evasion mechanism that works across Windows versions without hardcoded dependencies.
+
+The technique demonstrates that while security products can hook API functions, they cannot prevent direct system call invocation when the syscall numbers are dynamically resolved at runtime.
+
+## Next Steps
+
+After implementing HellsGate, consider:
+1. **HalosGate**: Enhanced version that handles syscall number randomization
+2. **TartarusGate**: Further improvements for advanced EDR evasion
+3. **Syscall Obfuscation**: Techniques to hide direct syscall usage
+4. **Integration**: Combining with other evasion methods for layered protection
+
 
 </details>
