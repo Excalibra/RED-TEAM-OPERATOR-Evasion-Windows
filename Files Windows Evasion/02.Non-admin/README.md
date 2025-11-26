@@ -1201,7 +1201,7 @@ The technique remains valuable for educational purposes and demonstrates importa
 
 
 
-</details>
+<details>
 <summary>05 - Hooks vs Halo Gate</summary>
 
 ## Overview
