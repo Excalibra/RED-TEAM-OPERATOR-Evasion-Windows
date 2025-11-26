@@ -1476,14 +1476,26 @@ cd ..\04.HalosGate
 msbuild HellsGate.sln /t:Rebuild /p:Configuration=Release /p:Platform="x64"
 ```
 
-<img width="1501" height="241" alt="image" src="https://github.com/user-attachments/assets/7a0d115f-2fa9-4b3d-b44b-492d5242a243" />
+<img width="1610" height="801" alt="image" src="https://github.com/user-attachments/assets/650d82c9-e61b-4e5a-98e9-25de48d8a835" />
+<img width="1608" height="799" alt="image" src="https://github.com/user-attachments/assets/e94c41f0-4365-4535-9133-b98de3d276b8" />
 
 
 ### Step 2: Verify Hooks Exist
 
 1. **Run the compiled executable**
-2. **Observe successful execution** despite hooks
-3. **Confirm in debugger** that NtCreateThreadEx is still hooked
+   <img width="377" height="221" alt="image" src="https://github.com/user-attachments/assets/8b470eea-300c-4a99-9ee8-61bb8f9798db" />
+   
+2. **Copy to test environment folder and rename it as halo.exe**
+   <img width="380" height="173" alt="image" src="https://github.com/user-attachments/assets/155fb672-0cd6-4ca3-88a7-580f23c1efcf" />
+
+3. **Observe successful execution** despite hooks
+   <img width="1293" height="704" alt="image" src="https://github.com/user-attachments/assets/dd66499c-1624-4ee2-a410-2287f29e78da" />
+
+4. **Confirm in debugger** that NtCreateThreadEx is still hooked
+   - Run halo.exe again and Attach on the debugger this time
+     <img width="1609" height="797" alt="image" src="https://github.com/user-attachments/assets/b760770a-a991-4f5f-8e3b-0091019cd4e7" />
+	 <img width="1611" height="772" alt="image" src="https://github.com/user-attachments/assets/7f462ba4-216d-4b86-ad2e-b49ba98d8991" />
+	 <img width="1683" height="523" alt="image" src="https://github.com/user-attachments/assets/56339926-c51b-4aaf-8af4-e729584deffd" />
 
 ### Step 3: Debugger Verification
 
@@ -1491,6 +1503,17 @@ msbuild HellsGate.sln /t:Rebuild /p:Configuration=Release /p:Platform="x64"
 2. **Examine NtCreateThreadEx** - confirm it starts with `E9` (hook)
 3. **Check neighboring functions** - observe clean syscalls at +32, +64 bytes
 4. **Verify calculated syscall numbers** match expected values
+
+   - We run it:
+     <img width="1681" height="807" alt="image" src="https://github.com/user-attachments/assets/31ab49cd-4111-436b-b22e-c35b10f1d0e6" />
+
+   - Check if hook is still there: Right click on hook -> Analysis -> Analyze module:
+     <img width="1681" height="816" alt="image" src="https://github.com/user-attachments/assets/bdb870e4-3fef-4105-b5e9-bde522b7b2ad" />
+	 <img width="1684" height="823" alt="image" src="https://github.com/user-attachments/assets/400dea0f-8a9e-4fc5-9c4a-83824f8a430c" />
+
+   - Run it, and it works as intended:
+     <img width="1684" height="820" alt="image" src="https://github.com/user-attachments/assets/f2a2668e-8d6b-4668-8ce0-72219892a242" />
+
 
 ## Technical Considerations
 
