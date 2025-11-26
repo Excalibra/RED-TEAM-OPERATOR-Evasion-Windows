@@ -1,0 +1,2 @@
+building Hell's Gate:
+msbuild HellsGate.sln /t:Rebuild /p:Configuration=Release /p:Platform="x64"
