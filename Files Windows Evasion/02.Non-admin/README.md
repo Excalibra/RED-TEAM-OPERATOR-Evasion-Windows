@@ -1356,6 +1356,8 @@ Distance 3: Target + 96 bytes, Target - 96 bytes
 ... up to maximum search distance (typically 10)
 ```
 
+<img width="1610" height="801" alt="image" src="https://github.com/user-attachments/assets/6fed8421-ab71-47ff-b42a-4efd5a13c3ec" />
+
 ```c
 for (WORD idx = 1; idx <= 500; idx++) {
     // check neighboring syscall DOWN (idx * DOWN = -32 * idx)
@@ -1470,9 +1472,12 @@ if (*((PBYTE)pFunctionAddress) == 0xe9) {
 ### Step 1: Compile and Test
 
 ```batch
-cd 04.HalosGate
-msbuild HalosGate.sln /t:Rebuild /p:Configuration=Release /p:Platform="x64"
+cd ..\04.HalosGate
+msbuild HellsGate.sln /t:Rebuild /p:Configuration=Release /p:Platform="x64"
 ```
+
+<img width="1501" height="241" alt="image" src="https://github.com/user-attachments/assets/7a0d115f-2fa9-4b3d-b44b-492d5242a243" />
+
 
 ### Step 2: Verify Hooks Exist
 
