@@ -213,7 +213,7 @@ Different security vendors use various techniques:
 
 
 <details>
-<summary>02 - Process Unhooking Lab: Hooks vs Code Injections</summary>
+<summary>02 - Hooks vs Code Injections</summary>
 
 ### Step 1: Navigate to the Project Folder
 [01.ClassicInjection](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/01.ClassicInjection)
@@ -461,5 +461,11 @@ jmp back_to_original_code
 3. **Implement alternative injection** techniques that don't match known patterns
 
 ---
+
+</details>
+
+
+<details>
+<summary>03 - Process Unhooking Classic</summary>
 
 </details>
