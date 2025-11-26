@@ -701,3 +701,10 @@ This approach demonstrates the fundamental principle that security products rely
 The step-by-step execution with debugger verification ensures that the unhooking process is complete and effective before proceeding with injection operations.
 
 </details>
+
+
+
+<details>
+<summary>04 - Hooks vs Hells Gate</summary>
+
+</details>
