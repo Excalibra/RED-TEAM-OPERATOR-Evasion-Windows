@@ -3455,7 +3455,7 @@ Application Information Service (AppInfo)
    
    <img width="967" height="281" alt="image" src="https://github.com/user-attachments/assets/bd5082c7-938e-456c-a017-2aac2c5e9c04" />
 
-**What Actually Happens Behind the Scenes (Instructor's Explanation):**
+**What Actually Happens Behind the Scenes:**
 
 > "But the notepad is actually a child of Explorer. And this is possible because svchost is spoofing the parent ID of Notepad, pointing it to the Explorer, which was actually the original caller for spawning the notepad. Because I was running launching Notepad from Taskbar."
 
@@ -3467,7 +3467,7 @@ Application Information Service (AppInfo)
 5. **PPID Spoofing Magic**: When user clicks "Yes", AppInfo creates the elevated Notepad but **spoofs the parent PID** to point back to Explorer (PID: 789) instead of itself
 6. **Final Result**: Notepad appears as a direct child of Explorer, completely hiding the AppInfo service's involvement
 
-**Key Insight from the Instructor:**
+**Key Insight:**
 The AppInfo service (svchost) performs the actual PPID spoofing to maintain the illusion that Explorer directly launched the elevated process, creating a seamless user experience while handling privilege elevation transparently in the background.
 
 ## Technical Implementation
@@ -4134,13 +4134,11 @@ if (FAILED(hr)) {
 }
 ```
 
-You're absolutely right! Let me add the detailed debugging section that shows the instructor's debugger analysis. Here's the complete section:
-
 ## Debugger Analysis - COM Internals
 
 ### Step 8: Debugging the COM Interface
 
-The instructor demonstrates how to analyze the COM interface calls using a debugger to understand the low-level mechanics.
+Here we will demonstrate how to analyze the COM interface calls using a debugger to understand the low-level mechanics.
 
 #### Adding Debug Breakpoint
 
@@ -4405,4 +4403,447 @@ compile.bat
 - MSDN: ITaskScheduler Interface Documentation
 
 
+</details>
+
+
+
+<details>
+<summary>12 - Changing Parents Emotet Method</summary>
+
+## Overview
+
+This section demonstrates WMI (Windows Management Instrumentation) PPID spoofing, a technique famously used by the Emotet malware family. WMI is commonly known for lateral movement but can also effectively break parent-child process relationships by spawning processes through the WMI provider host rather than the malicious process itself.
+
+## The Problem: Command-Line WMI Detection
+
+### Step 1: Understanding Traditional WMI Detection
+
+Here's why command-line WMI usage is easily detectable:
+
+**Using WMIC Command-Line Tool:**
+```batch
+# Traditional WMI process creation - easily detectable
+wmic process call create "notepad.exe"
+```
+
+
+<img width="1332" height="633" alt="image" src="https://github.com/user-attachments/assets/4449c2c2-2ab4-4e16-83d1-e4409845eb05" />
+
+Second execution: 
+
+<img width="1331" height="642" alt="image" src="https://github.com/user-attachments/assets/3f699861-4e5e-4af4-a498-cbe22cc56378" />
+
+<img width="1352" height="763" alt="image" src="https://github.com/user-attachments/assets/a364d707-76e2-485d-bb0d-bd9b540b219a" />
+
+
+**What Happens During This Demonstration:**
+1. **First Execution**: Notepad spawns without detection
+2. **Second Execution**: Bitdefender detects suspicious activity and blocks the command
+3. **Antivirus Response**: Bitdefender kills the cmd.exe process, even though Notepad itself is safe
+
+   <img width="1029" height="725" alt="image" src="https://github.com/user-attachments/assets/7321f04c-3a18-4685-aa0a-8285f5e02372" />
+
+
+**The Detection Bypass Discovery:**
+```batch
+# Alternative namespace that avoids detection
+wmic /namespace:\\root\CIMV2 path win32_Process call create "notepad.exe"
+```
+
+<img width="1237" height="602" alt="image" src="https://github.com/user-attachments/assets/2e74f0c2-3da6-4ac4-9ffa-5cf4b72478d2" />
+
+Everytime we run this, it doesn't get killed:
+
+<img width="1232" height="633" alt="image" src="https://github.com/user-attachments/assets/5549126d-edaf-4937-a098-f2a3a35c1883" />
+
+
+**Why This Works:**
+- Different WMI namespace (`root\CIMV2` vs default)
+- Some AV solutions have incomplete coverage of all WMI namespaces
+- The spawned Notepad processes appear as children of `WmiPrvSE.exe` (WMI Provider Host) rather than cmd.exe
+
+  <img width="1414" height="673" alt="image" src="https://github.com/user-attachments/assets/d722c789-be18-4da2-908e-1768442c8ca3" />
+
+
+### Step 2: The Problem with Command-Line Tools
+
+**Why We Avoid WMIC:**
+- Command-line arguments are easily monitored by EDR systems
+- Well-known attack technique with established detection rules
+- Limited control over execution parameters
+- Creates clear audit trails in logs
+
+## Technical Implementation
+
+### Step 3: Programmatic WMI via COM Interface
+
+Instead of using detectable command-line tools, we implement WMI process creation programmatically using the COM interface.
+
+#### Compile and Run the Demonstration
+
+```batch
+cd 12.EmotetWMI
+compile.bat
+implant.exe
+```
+
+#### Code Walkthrough - Step by Step
+
+**Step 3.1: COM Library Initialization**
+
+```cpp
+// Initialize COM library with multithreaded apartment
+HRESULT hres = CoInitializeEx(0, COINIT_MULTITHREADED); 
+if (FAILED(hres)) {
+    printf("Failed to initialize COM library. Error code = 0x%x\n", hres);
+    return 1;
+}
+```
+
+**What This Does:**
+- Initializes the COM library for the current thread
+- `COINIT_MULTITHREADED` allows multiple threads to use COM
+- Required foundation for all subsequent COM operations
+
+**Step 3.2: COM Security Initialization**
+
+```cpp
+// Set COM security levels - crucial for WMI access
+hres = CoInitializeSecurity(
+    NULL,                       // Security descriptor
+    -1,                         // COM negotiates authentication service
+    NULL,                       // Authentication services
+    NULL,                       // Reserved
+    RPC_C_AUTHN_LEVEL_DEFAULT,  // Authentication level
+    RPC_C_IMP_LEVEL_IMPERSONATE,// Impersonation level
+    NULL,                       // Authentication info
+    EOAC_NONE,                  // Additional capabilities
+    NULL                        // Reserved
+);
+```
+
+**Security Parameters Explained:**
+- `RPC_C_AUTHN_LEVEL_DEFAULT`: Default authentication level
+- `RPC_C_IMP_LEVEL_IMPERSONATE`: Allows impersonation of client security context
+- Required for WMI to function properly
+- Without this, WMI calls will fail with access denied errors
+
+**Step 3.3: Creating WMI Locator Object**
+
+```cpp
+// Get the initial locator to WMI - this is our entry point
+IWbemLocator *pLoc = NULL;
+hres = CoCreateInstance(
+    CLSID_WbemLocator,          // Class ID for WMI locator
+    0,                          // No aggregation
+    CLSCTX_INPROC_SERVER,       // Run in same process
+    IID_IWbemLocator,           // Interface we want
+    (LPVOID *) &pLoc            // Output pointer
+);
+```
+
+**WMI Locator Purpose:**
+- `IWbemLocator` is the factory object for WMI connections
+- Provides `ConnectServer` method to connect to WMI namespaces
+- Acts as the gateway to WMI services
+
+**Step 3.4: Connecting to WMI Namespace**
+
+```cpp
+// Connect to the local root\cimv2 namespace
+IWbemServices *pSvc = NULL;
+hres = pLoc->ConnectServer(
+    _bstr_t(L"ROOT\\CIMV2"),    // WMI namespace
+    NULL,                       // User name (NULL = current user)
+    NULL,                       // Password (NULL = current)
+    0,                          // Locale (0 = default)
+    NULL,                       // Security flags
+    0,                          // Authority
+    0,                          // Context object
+    &pSvc                       // IWbemServices pointer
+);
+
+printf("Connected to ROOT\\CIMV2 WMI namespace\n");
+```
+
+**Namespace Selection:**
+- `ROOT\\CIMV2` is the standard WMI namespace for system classes
+- Contains `Win32_Process` class we need for process creation
+- Alternative namespaces can provide different functionality
+
+**Step 3.5: Setting Proxy Security**
+
+```cpp
+// Set security levels for the proxy - required for method execution
+hres = CoSetProxyBlanket(
+    pSvc,                       // The proxy to secure
+    RPC_C_AUTHN_WINNT,          // Windows NTLM authentication
+    RPC_C_AUTHZ_NONE,           // No authorization
+    NULL,                       // Server principal name
+    RPC_C_AUTHN_LEVEL_CALL,     // Authenticate at call level
+    RPC_C_IMP_LEVEL_IMPERSONATE,// Impersonation level
+    NULL,                       // Client identity
+    EOAC_NONE                   // No additional capabilities
+);
+```
+
+**Why Proxy Security Matters:**
+- WMI operations require specific security context
+- Without proper proxy settings, method calls fail
+- Ensures the client has appropriate permissions
+
+**Step 3.6: Preparing the WMI Class and Method**
+
+```cpp
+// Set up to call the Win32_Process::Create method
+BSTR ClassName = SysAllocString(L"Win32_Process");
+BSTR MethodName = SysAllocString(L"Create");
+
+// Get the Win32_Process class object
+IWbemClassObject *pClass = NULL;
+hres = pSvc->GetObject(ClassName, 0, NULL, &pClass, NULL);
+
+// Get the Create method definition
+IWbemClassObject *pInParamsDefinition = NULL;
+hres = pClass->GetMethod(MethodName, 0, &pInParamsDefinition, NULL);
+
+// Create an instance for our method parameters
+IWbemClassObject *pClassInstance = NULL;
+hres = pInParamsDefinition->SpawnInstance(0, &pClassInstance);
+```
+
+**The "Twisted" Part Explained:**
+1. **Get Class Object**: Obtain the `Win32_Process` class definition
+2. **Get Method Definition**: Retrieve the `Create` method parameters
+3. **Spawn Instance**: Create a parameter object for our specific call
+4. This multi-step process is necessary because WMI uses a strongly-typed system
+
+**Step 3.7: Setting Command Line Parameters**
+
+```cpp
+// Create the values for the in parameters
+VARIANT varCommand;
+varCommand.vt = VT_BSTR;                        // Variable type: BSTR string
+varCommand.bstrVal = _bstr_t(L"notepad.exe c:\\rto\\boom.txt");
+
+// Store the value in our parameter object
+hres = pClassInstance->Put(L"CommandLine", 0, &varCommand, 0);
+wprintf(L"The command is: %s\n", V_BSTR(&varCommand));
+```
+
+**VARIANT Structure:**
+- `VT_BSTR`: Specifies this is a string type
+- `bstrVal`: Contains the actual command string
+- `Put()` method stores the parameter in our method instance
+
+**Step 3.8: Executing the Method**
+
+```cpp
+// Execute the Create method
+IWbemClassObject *pOutParams = NULL;
+hres = pSvc->ExecMethod(
+    ClassName,                  // Class name
+    MethodName,                 // Method name  
+    0,                          // Flags
+    NULL,                       // Context
+    pClassInstance,             // Input parameters
+    &pOutParams,                // Output parameters
+    NULL                        // Call result
+);
+```
+
+**Method Execution Details:**
+- `ExecMethod` actually runs the WMI method
+- `pClassInstance` contains our command line parameter
+- `pOutParams` will contain the method return values
+
+**Step 3.9: Retrieving and Displaying Results**
+
+```cpp
+// Extract the return value from output parameters
+VARIANT varReturnValue;
+hres = pOutParams->Get(_bstr_t(L"ReturnValue"), 0, &varReturnValue, NULL, 0);
+
+wprintf(L"Return value: %s\n", V_BSTR(&varReturnValue));
+```
+
+**Return Value Interpretation:**
+- `0`: Success - process created successfully
+- Non-zero: Error code indicating failure reason
+- This matches standard Windows error codes
+
+**Step 3.10: Comprehensive Cleanup**
+
+```cpp
+// Clean up all allocated resources
+VariantClear(&varCommand);
+VariantClear(&varReturnValue);
+SysFreeString(ClassName);
+SysFreeString(MethodName);
+pClass->Release();
+pClassInstance->Release();
+pInParamsDefinition->Release();
+pOutParams->Release();
+pLoc->Release();
+pSvc->Release();
+CoUninitialize();
+```
+
+**Why Proper Cleanup Matters:**
+- Prevents memory leaks
+- Releases COM references properly
+- Ensures WMI connections are closed cleanly
+
+## Practical Demonstration
+
+### Step 4: Observing the Results
+
+**After Running the Implant:**
+1. **Process Tree Observation:**
+   ```
+   WmiPrvSE.exe (WMI Provider Host, PID: 1234)
+   └── notepad.exe (PID: 5678) - Child of WMI, not implant.exe
+   
+   implant.exe (PID: 1000) - No direct relationship to notepad
+   ```
+
+2. **File Verification:**
+   - Notepad opens `c:\rto\boom.txt` as specified in command line
+   - Process ID matches what was spawned by WMI
+
+3. **Return Value Confirmation:**
+   - Program outputs "Return value: 0" indicating success
+   - Any non-zero value would indicate an error
+
+### Step 5: Why This Evades Detection
+
+**Traditional Process Creation:**
+```
+implant.exe → CreateProcess() → notepad.exe
+                    ^
+              EDR sees direct parent-child relationship
+```
+
+**WMI Process Creation:**
+```
+implant.exe → WMI COM calls → WmiPrvSE.exe → notepad.exe
+                    ^                              ^
+           EDR sees COM calls           Actual process appears as 
+           but no direct process        child of legitimate WMI service
+           creation
+```
+
+## Advanced Techniques
+
+### Step 6: Stealth Enhancements
+
+**Alternative WMI Namespaces:**
+```cpp
+// Try different namespaces for evasion
+_bstr_t namespaces[] = {
+    L"ROOT\\CIMV2",
+    L"ROOT\\DEFAULT", 
+    L"ROOT\\SECURITY",
+    L"ROOT\\RSOP\\Computer"
+};
+
+for (auto ns : namespaces) {
+    hres = pLoc->ConnectServer(ns, NULL, NULL, 0, NULL, 0, 0, &pSvc);
+    if (SUCCEEDED(hres)) break;
+}
+```
+
+**Process Creation with Different Priorities:**
+```cpp
+// Set process priority class through WMI
+VARIANT varPriority;
+varPriority.vt = VT_I4;
+varPriority.lVal = NORMAL_PRIORITY_CLASS;
+pClassInstance->Put(L"Priority", 0, &varPriority, 0);
+```
+
+### Step 7: Error Handling and Reliability
+
+**Comprehensive Error Checking:**
+```cpp
+// Enhanced error handling for production use
+if (FAILED(hres)) {
+    _com_error err(hres);
+    wprintf(L"WMI Operation failed: %s\n", err.ErrorMessage());
+    
+    // Check specific WMI error codes
+    if (hres == WBEM_E_ACCESS_DENIED) {
+        wprintf(L"Access denied - check permissions\n");
+    } else if (hres == WBEM_E_NOT_FOUND) {
+        wprintf(L"Class or method not found\n");
+    }
+}
+```
+
+## Detection and Mitigation
+
+### How EDRs Can Detect WMI PPID Spoofing
+
+**Behavioral Indicators:**
+- COM activation of WMI interfaces from unusual processes
+- `Win32_Process.Create` method calls from non-admin tools
+- Rapid process creation via WMI
+- Mismatch between WMI caller and typical system behavior
+
+**Forensic Artifacts:**
+- WMI event logs (Event ID 5857, 5858, 5859)
+- COM activation events in Windows logs
+- WMI temporary files and repositories
+
+### Defensive Strategies
+
+**Monitoring WMI Activity:**
+```cpp
+// EDRs can monitor CoCreateInstance for WMI CLSIDs
+BOOL MonitorWmiActivation(DWORD callerPid, CLSID clsid) {
+    if (IsEqualCLSID(clsid, CLSID_WbemLocator)) {
+        // Check if calling process typically uses WMI
+        // Verify the WMI namespace being accessed
+        // Alert on process creation via WMI from unusual callers
+        return IsSuspiciousWmiUsage(callerPid);
+    }
+    return FALSE;
+}
+```
+
+**Application Control Policies:**
+- Restrict WMI access to authorized applications only
+- Implement WMI logging and monitoring
+- Use application whitelisting to prevent unauthorized WMI usage
+
+## Building the Project
+
+### Prerequisites
+- Visual Studio 2019 or later
+- Windows SDK
+- WMI headers and libraries
+
+### Compilation
+```batch
+cd 12.EmotetWMI
+compile.bat
+```
+
+### Required Libraries and Headers
+```cpp
+#define _WIN32_DCOM  // Required for DCOM functionality
+#include <comdef.h>
+#include <Wbemidl.h>
+
+#pragma comment(lib, "wbemuuid.lib")  // WMI UUID library
+#pragma comment(lib, "ole32.lib")     // COM library
+```
+
+## References
+
+- Microsoft Docs: WMI COM Interface
+- MITRE ATT&CK: T1047 (WMI)
+- Emotet Malware Analysis Reports
+- Windows Internals, 7th Edition - WMI Architecture
+	
 </details>
