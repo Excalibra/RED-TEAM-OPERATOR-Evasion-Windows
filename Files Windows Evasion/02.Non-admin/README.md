@@ -4085,10 +4085,21 @@ pITask->SetFlags(TASK_FLAG_RUN_ONLY_IF_LOGGED_ON |
                  TASK_FLAG_DELETE_WHEN_DONE);
 ```
 
+Recompile again and execute implant.exe
+
 <img width="1686" height="818" alt="image" src="https://github.com/user-attachments/assets/43ea7c5b-86bb-4f2f-bd29-344c581cd3ab" />
+
+Cannot see it on File Explorer on c:\windows\tasks or on the cmd, however if we type to see hidden files `ah c:\windows\tasks` we get this and it confirms that .job was indeed created with hidden flag:
+
+<img width="1690" height="803" alt="image" src="https://github.com/user-attachments/assets/15fd63ba-71d4-4485-a585-8d031a164337" />
+
+If we hit `enter` once more, we shouldn't see this file anymore: 
+
+<img width="1290" height="237" alt="image" src="https://github.com/user-attachments/assets/fdd00a21-036f-4a63-9e5a-d9a8ce80b85e" />
 
 
 #### Dynamic Task Naming
+
 ```cpp
 // Generate random task names to avoid detection
 WCHAR taskName[64];
@@ -4122,6 +4133,217 @@ if (FAILED(hr)) {
     }
 }
 ```
+
+You're absolutely right! Let me add the detailed debugging section that shows the instructor's debugger analysis. Here's the complete section:
+
+## Debugger Analysis - COM Internals
+
+### Step 8: Debugging the COM Interface
+
+The instructor demonstrates how to analyze the COM interface calls using a debugger to understand the low-level mechanics.
+
+#### Adding Debug Breakpoint
+
+**Modify the code to add a debug break:**
+```cpp
+// Add this line after the initial message
+printf("Let's start a dance!\n"); 
+__debugbreak();  // Add this line for debugger analysis
+getchar();
+```
+
+
+<img width="1678" height="810" alt="image" src="https://github.com/user-attachments/assets/917f0b09-2b99-4be6-9c71-2f8330914cd4" />
+
+
+**Recompile with debug break:**
+```batch
+compile.bat
+```
+
+#### Debugger Session Setup
+
+1. **Run the implant:**
+   ```batch
+   implant.exe
+   ```
+
+2. **Attach debugger to the process**
+3. **The program hits the debug breakpoint immediately**
+4. **Remove the breakpoint instruction in the debugger:**
+   - Use "Assemble" feature to replace `int 3` with `nop`
+   - Or simply patch it out to continue execution
+
+<img width="1613" height="798" alt="image" src="https://github.com/user-attachments/assets/95da45e7-0ae5-4c09-9bf8-0693f5ac9463" />
+<img width="1612" height="793" alt="image" src="https://github.com/user-attachments/assets/b0e2617b-0c09-4670-a12e-1fe2661d4113" />
+
+#### Step-by-Step Debugger Analysis
+
+**Phase 1: COM Initialization**
+```cpp
+// Set breakpoint on CoInitialize
+hr = CoInitialize(NULL);
+printf("COM initialized.\n"); 
+getchar();
+```
+
+**Debugger Observations:**
+- After `CoInitialize`, two additional DLLs are loaded into the process
+- These are COM infrastructure libraries required for object creation
+- The COM library is now ready for object instantiation
+
+**Phase 2: Task Scheduler Object Creation**
+```cpp
+// Set breakpoint on CoCreateInstance
+hr = CoCreateInstance(CLSID_CTaskScheduler,
+                       NULL,
+                       CLSCTX_INPROC_SERVER,
+                       IID_ITaskScheduler,
+                       (void **) &pITS);
+```
+
+**Debugger Analysis of CoCreateInstance:**
+- **Before call**: `RAX` contains stack address information
+- **During call**: The function executes and returns a pointer
+- **After call**: `RAX` holds a pointer to the object's vtable
+
+**Examining the Returned Object:**
+```
+In debugger, examine the returned pointer:
+- Follow the pointer in memory dump
+- See a table of function pointers (vtable)
+- Each entry points to a method in MSTask.dll
+- This is the COM object's virtual function table
+```
+
+**VTable Structure Revealed:**
+```
+pITS object pointer (e.g., 0x7FF...)
+├── vtable pointer (points to method table)
+    ├── [0] QueryInterface method
+    ├── [1] AddRef method  
+    ├── [2] Release method
+    ├── [3] NewWorkItem method  // Offset +0x18
+    ├── [4] AddWorkItem method
+    ├── [5] Enum method
+    └── ... other ITaskScheduler methods
+```
+
+**Phase 3: Creating New Task**
+```cpp
+// Set breakpoint on NewWorkItem
+hr = pITS->NewWorkItem(pwszTaskName, CLSID_CTask, IID_ITask, (IUnknown**) &pITask);
+```
+
+**Debugger Analysis of Method Call:**
+```
+Assembly level view:
+mov rcx, pITS_object      ; Load object pointer to RCX
+mov rax, [rcx]            ; Dereference to get vtable pointer
+call [rax+0x18]           ; Call NewWorkItem method at offset 0x18
+
+What happens:
+1. RCX contains the object pointer from CoCreateInstance
+2. [RCX] dereferences to get the vtable address  
+3. [RAX+0x18] accesses the NewWorkItem method pointer
+4. call executes the method through the vtable
+```
+
+**Phase 4: Task Configuration Methods**
+```cpp
+// Each method call follows the same vtable pattern
+pITask->SetComment(L"C'mon! Notepad is legit!");
+pITask->SetApplicationName(L"C:\\Windows\\System32\\notepad.exe");
+pITask->SetWorkingDirectory(L"C:\\Windows\\System32");
+pITask->SetParameters(L"c:\\rto\\boom.txt");
+```
+
+**Debugger Analysis of ITask Methods:**
+```
+SetComment call:
+- call [rax+0x90]  // SetComment method at vtable offset 0x90
+- RDX contains pointer to "C'mon! Notepad is legit!" string
+
+SetApplicationName call:  
+- call [rax+0x100] // SetApplicationName at offset 0x100
+- RDX contains pointer to "C:\\Windows\\System32\\notepad.exe"
+
+SetWorkingDirectory call:
+- call [rax+0x120] // SetWorkingDirectory at offset 0x120
+- RDX contains pointer to "C:\\Windows\\System32"
+
+SetParameters call:
+- call [rax+0x110] // SetParameters at offset 0x110  
+- RDX contains pointer to "c:\\rto\\boom.txt"
+```
+
+**Examining Method Parameters in Debugger:**
+- Set breakpoint before each method call
+- Examine `RDX` register - contains string parameter pointers
+- Follow pointers in memory dump to see actual string data
+- Observe how each method configures different aspects of the task
+
+**Phase 5: Task Execution and Cleanup**
+```cpp
+// Set breakpoint on Run method
+hr = pITask->Run();
+
+// Set breakpoint on cleanup methods
+pITS->Delete(pwszTaskName);
+pITS->Release();
+CoUninitialize();
+```
+
+**Debugger Observations During Cleanup:**
+- `Delete` method removes the .job file from disk
+- `Release` methods decrement COM object reference counts
+- `CoUninitialize` unloads COM libraries from process
+- MSTask.dll gets unloaded after object releases
+
+### Key Insights from Debugger Analysis
+
+1. **COM is Just Structured Function Pointers:**
+   - No magic - just well-organized function tables
+   - Each interface is a vtable of method pointers
+   - Objects are structures pointing to these vtables
+
+2. **Method Offets are Consistent:**
+   - `SetComment` at +0x90
+   - `SetParameters` at +0x110  
+   - `SetApplicationName` at +0x100
+   - `SetWorkingDirectory` at +0x120
+
+3. **String Parameters Passed in RDX:**
+   - All string parameters passed via RDX register
+   - Unicode strings (LPCWSTR) used throughout
+   - Memory allocated by caller, managed by COM
+
+4. **Error Handling Through HRESULT:**
+   - Each method returns HRESULT status code
+   - SUCCEEDED()/FAILED() macros check results
+   - Proper error handling essential for reliability
+
+### Practical Debugging Tips
+
+**Setting Effective Breakpoints:**
+```cpp
+// Break before key COM calls
+__debugbreak();  // Manual breakpoint
+hr = CoCreateInstance(...);
+
+// Or use conditional breakpoints in debugger
+// Break when specific methods are called
+```
+
+**Examining COM Objects:**
+- Use memory window to examine object structures
+- Follow pointers to see vtable entries
+- Check what DLL each method points to (usually MSTask.dll)
+
+**Monitoring DLL Loading:**
+- Watch modules window during execution
+- See MSTask.dll load after CoCreateInstance
+- See it unload after CoUninitialize
 
 ## Detection and Mitigation
 
