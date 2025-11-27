@@ -468,6 +468,8 @@ jmp back_to_original_code
 <details>
 <summary>03 - Process Unhooking Classic Method</summary>
 
+[02.FreshCopy](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/02.FreshCopy)
+
 ## Overview
 
 The classic unhooking method involves loading a fresh, clean copy of ntdll.dll from disk and using it to overwrite the hooked version in memory. This technique removes security product hooks and restores original system call functionality, allowing successful code injection without detection.
@@ -485,8 +487,6 @@ The technique works by:
 4. Performing injection using now-unhooked system calls
 
 ### Code Implementation
-
-[02.FreshCopy](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/02.FreshCopy)
 
 #### Main Unhooking Flow
 
@@ -706,6 +706,8 @@ The step-by-step execution with debugger verification ensures that the unhooking
 <details>
 <summary>04 - Hooks vs Hells Gate</summary>
 
+[01.Unhooks/03.HellsGate](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/03.HellsGate)
+
 ## Overview
 
 Hells Gate is an advanced technique that dynamically resolves system call numbers at runtime, eliminating the need for hardcoded values that change between Windows versions. This method bypasses API hooks by making direct system calls while maintaining compatibility across different Windows releases.
@@ -731,8 +733,6 @@ One way to deal with this problem is to dynamically detect which version of wind
 ## Implementation Architecture
 
 ### Core Components
-
-[01.Unhooks/03.HellsGate](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/03.HellsGate)
 
 #### 1. Assembly Stubs (HellsGate.asm)
 
@@ -1204,6 +1204,8 @@ The technique remains valuable for educational purposes and demonstrates importa
 <details>
 <summary>05 - Hooks vs Halo Gate</summary>
 
+[01.Unhooks/04.HalosGate](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/04.HalosGate)
+
 ## Overview
 
 Halo's Gate is an enhancement to the Hell's Gate technique that enables dynamic syscall resolution even when NTDLL functions are hooked by AV/EDR solutions. This method bypasses API hooks without requiring a fresh copy of NTDLL from disk by leveraging the linear and ordered nature of syscall numbers in memory.
@@ -1219,8 +1221,6 @@ While Hell's Gate works effectively against unhooked NTDLL, it fails when securi
 System calls in NTDLL are arranged in linear, sequential order in memory. When a specific syscall is hooked, we can examine its neighbors to find clean (unhooked) syscalls and mathematically derive the original syscall number.
 
 ## Practical Demonstration
-
-[01.Unhooks/04.HalosGate](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/04.HalosGate)
 
 ### Step 1: Analyzing Hooked NTDLL in Notepad
 
@@ -1555,13 +1555,13 @@ The technique demonstrates that even when security products hook critical functi
 <details>
 <summary>06 - Process Unhooking Peruns Fart</summary>
 
+[01.Unhooks/05.PerunsFart](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/05.PerunsFart)
+
 ## Overview
 
 Perun's Fart (also known as Parent SVART) is an advanced technique for unhooking NTDLL without reading a fresh copy from disk, which some EDR solutions may flag as suspicious behavior. Instead, it leverages the natural process creation sequence to access a clean version of NTDLL from a suspended process.
 
 ## Core Concept: Exploiting Process Creation Timing
-
-[01.Unhooks/05.PerunsFart](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/01.Unhooks/05.PerunsFart)
 
 ### The Race Condition Advantage
 
@@ -1989,6 +1989,8 @@ This technique demonstrates sophisticated understanding of Windows internals and
 <details>
 <summary>07 - Silencing Process Event Tracing</summary>
 
+[02.Non-admin/02.SilenceETW](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/02.SilenceETW)
+
 ## Overview
 
 Event Tracing for Windows (ETW) is a powerful kernel-level tracing facility that provides detailed monitoring of application and operating system events. This repository demonstrates techniques for bypassing ETW monitoring by patching critical functions in memory, specifically targeting the `EtwEventWrite` function in ntdll.dll.
@@ -1996,8 +1998,6 @@ Event Tracing for Windows (ETW) is a powerful kernel-level tracing facility that
 <img width="919" height="888" alt="image" src="https://github.com/user-attachments/assets/c09919b9-fdf0-44ec-b875-901686ff8498" />
 
 ## ETW Architecture Overview
-
-[02.Non-admin/02.SilenceETW](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/02.SilenceETW)
 
 ETW consists of three main components:
 
@@ -2409,6 +2409,8 @@ This batch file handles the compilation process for the implant.
 
 <summary>08 - Module Stomping</summary>
 
+[02.Non-admin/03.ModuleStomp](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/03.ModuleStomp)
+
 ## Overview
 
 Module Stomping is an advanced technique for hiding malicious payloads by overwriting unused sections of legitimate DLLs loaded in process memory. This approach helps evade detection by reducing suspicious memory artifacts that are typically flagged by security tools.
@@ -2435,8 +2437,6 @@ When executing payloads using traditional methods, several detectable artifacts 
 3. **Execution Camouflage**: Execute payload from within the DLL's address space, making it appear as legitimate code
 
 ## Step-by-Step Demonstration
-
-[02.Non-admin/03.ModuleStomp](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/03.ModuleStomp)
 
 ### Step 1: Traditional Payload Execution (Baseline)
 
@@ -2891,7 +2891,9 @@ compile.bat
 
 <details>
 <summary>09 - No-New-Thread Payload Execution</summary>
-
+	
+[02.Non-admin/04.PayloadExec](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/04.PayloadExec)
+	
 ## Overview
 
 No-New-Thread execution is an advanced technique that avoids creating new threads to execute payloads, instead hijacking existing thread execution flows. This approach significantly reduces detection surface by avoiding kernel-level thread creation events that EDR systems monitor.
@@ -2920,8 +2922,6 @@ CreateThread(0, 0, (LPTHREAD_START_ROUTINE)ptr, NULL, 0, 0);
 - EDRs can correlate thread creation with other suspicious activities
 
 ## Step-by-Step Implementation
-
-[02.Non-admin/04.PayloadExec](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/04.PayloadExec)
 
 ### Step 1: Baseline - Module Stomping with Thread Creation
 
