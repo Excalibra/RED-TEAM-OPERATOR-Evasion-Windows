@@ -398,6 +398,399 @@ Educational and research purposes only. See LICENSE for details.
 
 <details>
 <summary>02 - Blocking EPP Comms-Listing Connections</summary>
+</details>
 
-      
+
+
+<details>
+<summary>02 - Blocking EPP Comms-Listing Connections</summary>
+
+## Overview
+
+This module demonstrates programmatic enumeration of TCP network connections using Windows Management Instrumentation (WMI) to identify security agent communications without relying on detectable command-line tools. This is the foundational step for disrupting EDR/AV telemetry communications.
+
+## Technical Implementation
+
+### Step 1: Understanding the Operational Need
+
+**Attack Scenario:**
+- An attacker lands on a machine with EDR/AV agents
+- These agents send telemetry and logs to central repositories
+- The attacker wants to identify and potentially disrupt these communications
+- GUI tools like Process Hacker are not available during engagements
+- Command-line tools like `netstat` are heavily monitored
+
+**Target Communications:**
+- EDR agents communicating with cloud providers
+- AV solutions checking for updates
+- Sysmon sending event logs to collectors
+- Any outbound security-related communications
+
+### Step 2: Traditional Connection Enumeration Methods
+
+#### Using Command-Line Tools
+
+**Netstat Approach:**
+```batch
+netstat -ano | findstr ESTABLISHED
+```
+
+**WMI Command-Line Approach:**
+```batch
+wmic /namespace:\\root\standardcimv2 path MSFT_NetTCPConnection get LocalAddress,LocalPort,RemoteAddress,RemotePort,OwningProcess /format:table
+```
+
+**Problems with Command-Line:**
+- Easily detectable by security monitoring
+- Creates clear audit trails
+- Limited filtering capabilities
+- Inconsistent output formatting
+
+### Step 3: Programmatic WMI Implementation
+
+#### Compile and Run the Demonstration
+
+Open **Developer Command Prompt for VS**:
+
+```batch
+cd 02.BlockingEPPComms
+compile.bat
+implant.exe
+```
+
+#### Code Walkthrough
+
+**Step 3.1: COM Library Initialization**
+
+```cpp
+// Initialize COM library with multithreaded apartment
+HRESULT hres = CoInitializeEx(0, COINIT_MULTITHREADED); 
+if (FAILED(hres)) {
+    printf("Failed to initialize COM library. Error code = 0x%x\n", hres);
+    return 1;
+}
+
+// Set COM security levels
+hres = CoInitializeSecurity(
+    NULL, 
+    -1,                          // COM negotiates service
+    NULL,                        // Authentication services
+    NULL,                        // Reserved
+    RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication 
+    RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation
+    NULL,                        // Authentication info
+    EOAC_NONE,                   // Additional capabilities 
+    NULL                         // Reserved
+);
+```
+
+**COM Security Requirements:**
+- `COINIT_MULTITHREADED` allows concurrent WMI operations
+- `RPC_C_IMP_LEVEL_IMPERSONATE` enables service impersonation
+- Required for WMI to access network connection information
+
+**Step 3.2: WMI Locator Creation**
+
+```cpp
+// Get the initial locator to WMI
+IWbemLocator *pLoc = NULL;
+hres = CoCreateInstance(
+    CLSID_WbemLocator,           // WMI locator class ID
+    0, 
+    CLSCTX_INPROC_SERVER,        // Run in same process
+    IID_IWbemLocator,            // Interface identifier
+    (LPVOID *) &pLoc             // Output pointer
+);
+```
+
+**WMI Locator Purpose:**
+- Factory object for WMI namespace connections
+- Provides `ConnectServer` method for namespace access
+- Required gateway for all WMI operations
+
+**Step 3.3: Namespace Connection**
+
+```cpp
+// Connect to the local root\standardcimv2 namespace
+IWbemServices *pSvc = NULL;
+hres = pLoc->ConnectServer(
+    _bstr_t(L"ROOT\\StandardCIMV2"),  // Target namespace
+    NULL,                             // User name
+    NULL,                             // Password  
+    0,                                // Locale
+    NULL,                             // Security flags
+    0,                                // Authority
+    0,                                // Context object
+    &pSvc                             // Service pointer
+);
+
+printf("Connected to ROOT\\StandardCIMV2 namespace\n");
+```
+
+**Namespace Selection:**
+- `ROOT\\StandardCIMV2` contains networking classes
+- Alternative to `ROOT\\CIMV2` used in previous modules
+- Contains `MSFT_NetTCPConnection` class for TCP connections
+
+**Step 3.4: Proxy Security Configuration**
+
+```cpp
+// Set security levels for the proxy
+hres = CoSetProxyBlanket(
+    pSvc,                        // The proxy to secure
+    RPC_C_AUTHN_WINNT,           // Windows NTLM authentication
+    RPC_C_AUTHZ_NONE,            // No authorization
+    NULL,                        // Server principal name
+    RPC_C_AUTHN_LEVEL_CALL,      // Authenticate at call level
+    RPC_C_IMP_LEVEL_IMPERSONATE, // Impersonation level
+    NULL,                        // Client identity
+    EOAC_NONE                    // No additional capabilities
+);
+```
+
+**Proxy Security Importance:**
+- Required for method execution on remote interfaces
+- Ensures proper authentication context
+- Without this, WMI operations may fail
+
+**Step 3.5: Class Enumeration Setup**
+
+```cpp
+// Class to target: MSFT_NetTCPConnection
+BSTR ClassName = SysAllocString(L"MSFT_NetTCPConnection");
+
+// Create an Enumerator object for instances of MSFT_NetTCPConnection
+IEnumWbemClassObject *pEnumerator = NULL;
+
+hres = pSvc->CreateInstanceEnum(
+    ClassName,
+    WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, 
+    NULL,
+    &pEnumerator
+);
+```
+
+**Enumerator Creation:**
+- `CreateInstanceEnum` gets all instances of the specified class
+- `WBEM_FLAG_FORWARD_ONLY` enables efficient forward-only enumeration
+- `WBEM_FLAG_RETURN_IMMEDIATELY` returns control immediately
+
+**Step 3.6: Connection Enumeration Loop**
+
+```cpp
+// List the connections
+while (pEnumerator) {
+    hres = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
+
+    if(uReturn == 0)
+        break;
+
+    // Data we want to extract
+    VARIANT vtPropOwningProc;
+    VARIANT vtPropLocAddr;
+    VARIANT vtPropLocPort;
+    VARIANT vtPropRemAddr;
+    VARIANT vtPropRemPort;
+
+    // Get the network-related values from the object
+    hres = pclsObj->Get(L"OwningProcess", 0, &vtPropOwningProc, 0, 0);
+    hres = pclsObj->Get(L"LocalAddress", 0, &vtPropLocAddr, 0, 0);
+    hres = pclsObj->Get(L"LocalPort", 0, &vtPropLocPort, 0, 0);
+    hres = pclsObj->Get(L"RemoteAddress", 0, &vtPropRemAddr, 0, 0);
+    hres = pclsObj->Get(L"RemotePort", 0, &vtPropRemPort, 0, 0);
+    
+    // Format and display the connection information
+    printf("|%6d | ", vtPropOwningProc.ulVal);
+    printf("%15S | ", vtPropLocAddr.bstrVal);
+    printf("%9d | ", vtPropLocPort.uintVal);
+    printf("%15S | ", vtPropRemAddr.bstrVal);
+    printf("%10d |\n", vtPropRemPort.uintVal);
+
+    // Clean up
+    VariantClear(&vtPropOwningProc);
+    VariantClear(&vtPropLocAddr);
+    VariantClear(&vtPropLocPort);
+    VariantClear(&vtPropRemAddr);
+    VariantClear(&vtPropRemPort);
+    pclsObj->Release();
+}
+```
+
+**VARIANT Structure Usage:**
+- `VARIANT` is a generic data type for COM properties
+- Different fields used based on data type (`ulVal`, `bstrVal`, `uintVal`)
+- Must be cleared with `VariantClear` after use
+
+**Step 3.7: Output Formatting**
+
+```cpp
+printf("+=======+=================+===========+=================+============+\n");
+printf("|  PID  |  LocalAddress   | LocalPort |  RemoteAddress  | RemotePort |\n");
+printf("+-------+-----------------+-----------+-----------------+------------+\n");
+// ... connection data printing ...
+printf("+=======+=================+===========+=================+============+\n");
+```
+
+**Table Format Benefits:**
+- Easy to read and parse
+- Consistent column alignment
+- Professional appearance
+- Easy to identify security agent connections
+
+## Practical Demonstration
+
+### Step 4: Running the Implant
+
+**Execute the Program:**
+```batch
+implant.exe
+```
+
+**Expected Output:**
+```
+Connected to ROOT\StandardCIMV2 namespace
++=======+=================+===========+=================+============+
+|  PID  |  LocalAddress   | LocalPort |  RemoteAddress  | RemotePort |
++-------+-----------------+-----------+-----------------+------------+
+|  2484 |    192.168.1.45 |     49234 |    52.85.124.84 |        443 |
+|   864 |    192.168.1.45 |     49235 |   151.101.1.140 |        443 |
+|  1332 |    192.168.1.45 |     49236 |    34.120.177.6 |        443 |
++=======+=================+===========+=================+============+
+```
+
+### Step 5: Identifying Security Agent Connections
+
+**Analysis Process:**
+1. **Process ID Correlation**: Cross-reference PIDs with running processes
+2. **Destination Analysis**: Identify cloud security provider IP ranges
+3. **Port Analysis**: Look for HTTPS (443) connections to suspicious destinations
+4. **Volume Assessment**: Identify processes with multiple outbound connections
+
+**Common Security Agent Indicators:**
+- Connections to known EDR/AV provider IP ranges
+- Multiple simultaneous connections from same PID
+- Regular heartbeat connections to cloud endpoints
+- HTTPS traffic to security-related domains
+
+### Step 6: Comparison with Traditional Methods
+
+**Command-Line Netstat Output:**
+```
+TCP    192.168.1.45:49234   52.85.124.84:443    ESTABLISHED     2484
+TCP    192.168.1.45:49235   151.101.1.140:443   ESTABLISHED     864
+```
+
+**WMI Command-Line Output:**
+```
+LocalAddress  LocalPort  RemoteAddress  RemotePort  OwningProcess
+192.168.1.45  49234      52.85.124.84   443         2484
+192.168.1.45  49235      151.101.1.140  443         864
+```
+
+**Programmatic Advantages:**
+- No command-line execution detectable by EDR
+- Custom filtering and processing capabilities
+- Integration with other attack components
+- Stealthier operation
+
+## Technical Deep Dive
+
+### Step 7: WMI Class Structure
+
+**MSFT_NetTCPConnection Properties:**
+```cpp
+class MSFT_NetTCPConnection {
+    [key] string LocalAddress;    // Local IP address
+    [key] uint16 LocalPort;       // Local port number
+    string RemoteAddress;         // Remote IP address  
+    uint16 RemotePort;            // Remote port number
+    uint32 OwningProcess;         // Process ID of connection owner
+    uint32 State;                 // Connection state (ESTABLISHED, etc.)
+    // ... other properties ...
+}
+```
+
+**Additional Useful Properties:**
+- `CreationClassName` - Class name identifier
+- `Caption` - Text description
+- `Description` - Additional information
+- `InstallDate` - When the connection was established
+
+### Step 8: Enhanced Enumeration Features
+
+**Filtering for Specific Processes:**
+```cpp
+// Add process ID filtering
+if (vtPropOwningProc.ulVal == targetPID) {
+    // Only process connections from specific PID
+    printf("|%6d | ", vtPropOwningProc.ulVal);
+    // ... rest of printing logic ...
+}
+```
+
+**State-Based Filtering:**
+```cpp
+// Get connection state
+VARIANT vtPropState;
+hres = pclsObj->Get(L"State", 0, &vtPropState, 0, 0);
+
+// Only show ESTABLISHED connections (state = 5)
+if (vtPropState.uintVal == 5) {
+    // Process established connections only
+}
+```
+
+**Remote Address Analysis:**
+```cpp
+// Analyze remote addresses for security providers
+if (IsSecurityProviderIP(vtPropRemAddr.bstrVal)) {
+    printf("[SECURITY AGENT] ");
+    // Highlight security-related connections
+}
+```
+
+## Building the Project
+
+### Prerequisites
+- Visual Studio 2019 or later
+- Windows SDK
+- WMI headers and libraries
+
+### Compilation
+```batch
+cd 02.BlockingEPPComms
+compile.bat
+```
+
+### Required Libraries and Headers
+```cpp
+#define _WIN32_DCOM  // Required for DCOM functionality
+#include <comdef.h>
+#include <Wbemidl.h>
+
+#pragma comment(lib, "wbemuuid.lib")  // WMI UUID library
+```
+
+## Next Steps: Connection Blocking
+
+This module establishes the foundation for identifying security agent communications. The next logical step involves:
+
+1. **Process Termination**: Killing security agent processes
+2. **Connection Termination**: Closing specific network connections
+3. **Firewall Rules**: Blocking outbound communications
+4. **Network Filtering**: Using Windows Filtering Platform
+
+**Privilege Requirements:**
+- Local administrator privileges for most blocking techniques
+- SYSTEM privileges for some advanced network manipulation
+- Proper planning to avoid detection during blocking operations
+
+## References
+
+- Microsoft Docs: MSFT_NetTCPConnection Class
+- Windows Internals, 7th Edition - Networking Components
+- MITRE ATT&CK: T1049 (System Network Connections Discovery)
+- WMI Network Classes Documentation
+
+
 </details>
