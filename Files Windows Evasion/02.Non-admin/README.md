@@ -5262,25 +5262,22 @@ compile.bat
 
 </details>
 
-
+<br><br>
 
 <details>
 <summary>Assignment #1 - Hooks</summary>
----
 <br>
 Identify what other DLLs are hooked by Bitdefender?
 
 Create unhooking module for these libraries.
 
 donate.hide01.ir
----
+
 </details>
-<br>
----
-<br>
+
+
 <details>
 <summary>Assignment #2 - Module Stomping</summary>
----
 <br>
 Try to figure out why the offset of 2 * 4kB was used in this technique?
 
@@ -5290,5 +5287,5 @@ Hint: check memory layout and contents of windows.storage.dll
 Additional question: Why 2 * 4kB + 12 bytes and not just 2 * 4kB?
 
 donate.hide01.ir
----
+
 </details>
