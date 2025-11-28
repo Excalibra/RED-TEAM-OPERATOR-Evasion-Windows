@@ -5,7 +5,7 @@
 
 ## Overview
 
-Event Log blinding is a technique that suspends Windows Event Log service threads to prevent security events from being recorded while maintaining the appearance of a normally running service. This method was reportedly used by advanced threat actors like NSA to avoid detection during operations.
+Event Log blinding is a technique that suspends Windows Event Log service threads to prevent security events from being recorded while maintaining the appearance of a normally running service. This method was reportedly used by advanced threat actors to avoid detection during operations.
 
 ## Technical Implementation
 
@@ -13,7 +13,13 @@ Event Log blinding is a technique that suspends Windows Event Log service thread
 
 The technique works by:
 1. **Identifying Event Log Service Process**: Locating the specific svchost.exe instance hosting the EventLog service
+      <img width="1332" height="816" alt="image" src="https://github.com/user-attachments/assets/a7eb7ce7-d09a-4a8c-b037-977a843e9b13" />
+   <img width="1331" height="818" alt="image" src="https://github.com/user-attachments/assets/f378af26-38b5-4d4b-a2d9-3f70a14200fe" />
+
 2. **Thread Identification**: Finding only the threads specifically responsible for event logging
+   <img width="1332" height="816" alt="image" src="https://github.com/user-attachments/assets/435d6e4b-d14b-434c-90c7-cd3b9a6ef2fa" />
+   <img width="1328" height="815" alt="image" src="https://github.com/user-attachments/assets/ca527107-86ad-4ef1-8340-2030bfe6b7b9" />
+   
 3. **Selective Suspension**: Suspending only event log-related threads while leaving other service threads running
 4. **Stealth Maintenance**: Keeping the service apparently running to avoid detection
 
@@ -24,12 +30,22 @@ The technique works by:
 **Open Event Viewer and Create Custom View:**
 1. Launch Event Viewer (`eventvwr.msc`)
 2. Create a new Custom View
+   <img width="1333" height="728" alt="image" src="https://github.com/user-attachments/assets/5067ead4-6753-4164-897c-b510a83487b3" />
+   
 3. Include all Windows logs and all Event IDs
+   <img width="1241" height="790" alt="image" src="https://github.com/user-attachments/assets/f1969385-849a-41eb-8982-a0208718464a" />
+   
 4. Name it "All Windows Logs" for monitoring
+<img width="783" height="513" alt="image" src="https://github.com/user-attachments/assets/50f4ced8-ebf0-47c7-a398-02442a562e3b" />
+   
+   <img width="1463" height="708" alt="image" src="https://github.com/user-attachments/assets/1427c67c-d90d-4657-9532-989598490b5e" />
 
-**Generate Test Events:**
+**Generate Test Events Before Suspension:**
 - Open Local Security Policy (`secpol.msc`)
-- Make policy changes to generate security events
+- Navigate to **Local Policies** → **Audit Policy**
+- Click on **Audit system events**
+- Check the **Success** checkbox and click **OK**
+- This generates audit policy change events (Event ID 4719)
 - Observe new events appearing in the custom view
 
 #### Manual Thread Suspension Test
@@ -38,7 +54,8 @@ The technique works by:
 1. Locate the Event Log service process (svchost.exe hosting EventLog)
 2. Open the Threads tab
 3. Manually suspend all Event Log-related threads
-4. Make additional policy changes
+   <img width="1569" height="698" alt="image" src="https://github.com/user-attachments/assets/75929937-7cbf-495b-b6e1-a481176a0584" />
+4. Make additional policy changes to test logging
 5. **Observation**: No new events appear in Event Viewer
 6. Resume threads to see queued events flood in
 
@@ -199,41 +216,55 @@ svchost with eventlog - PID: 1234
 [!] Eventlog thread FOUND: 1232. Suspending...done!
 ```
 
-**Verification Steps:**
+### Step 5: Testing Event Log Blinding
 
-1. **Check Thread Status in Process Explorer:**
-   - Open Process Explorer as Administrator
-   - Locate the EventLog-hosting svchost.exe process
-   - Check Threads tab - suspended threads show suspended state
-   - Compare thread IDs with implant output
+**Generate Test Events After Suspension:**
 
-2. **Test Event Logging:**
-   - Make system changes that normally generate events
-   - Open Local Security Policy and modify settings
-   - Check Event Viewer - no new events should appear
-   - The events are buffered but not written to disk
+1. **Open Local Security Policy:**
+   ```batch
+   secpol.msc
+   ```
 
-3. **Service Status Check:**
-   - Open Services.msc
-   - Event Log service shows "Running" status
-   - The service appears normal to monitoring tools
+2. **Navigate to Audit Policies:**
+   - Go to **Local Policies** → **Audit Policy**
+   - Select **Audit system events**
+   - Check **Success** checkbox
+   - Click **OK** to apply changes
 
-### Step 5: Important Considerations
+3. **Check Event Viewer:**
+   - Refresh the "All Windows Logs" custom view
+   - **Expected Result**: No new Event ID 4719 (audit policy change) events appear
+   - Events are generated but not written to disk due to suspended threads
+
+4. **Verify with Other Event Sources:**
+   - Try other system changes that normally generate events
+   - No new events should appear in any Windows logs
+   - The Event Log service appears running but logging is disabled
+
+**Thread Status Verification:**
+- Open Process Explorer as Administrator
+- Locate the EventLog-hosting svchost.exe process
+- Check Threads tab - suspended threads show suspended state
+- Compare thread IDs with implant output
+
+### Step 6: Important Considerations
 
 **Event Buffering Behavior:**
 - Events continue to be generated and buffered in memory
 - If threads are resumed, buffered events will be written to disk
 - System reboot clears the event buffers permanently
+- Events generated during suspension are lost after reboot
 
 **Stealth Advantages:**
-- Service continues to show "Running" status
+- Service continues to show "Running" status in Services.msc
 - No service crash or abnormal termination
 - Only specific logging threads are suspended
 - Other service functionality remains intact
+- Normal system operation continues uninterrupted
 
 ## Technical Deep Dive
 
-### Step 6: Understanding Service Host Architecture
+### Step 7: Understanding Service Host Architecture
 
 **Windows Service Host Model:**
 ```
@@ -252,25 +283,20 @@ svchost.exe (PID: 1234) - Service Host Process
 - Service tags identify threads belonging to specific services
 - Maintains stealth by only affecting Event Log functionality
 
-### Step 7: Advanced Techniques
+### Step 8: Event Generation Test Details
 
-**Alternative: Thread Termination**
-```cpp
-// Instead of suspending, threads can be terminated
-if (TerminateThread(hThread, NULL))
-    printf("Thread terminated successfully\n");
-```
+**Audit Policy Change Events:**
+- **Event ID**: 4719
+- **Source**: Microsoft-Windows-Security-Auditing
+- **Description**: System audit policy was changed
+- **Trigger**: Changing any audit policy setting
+- **Reliability**: Consistently generated on policy changes
 
-**Considerations for Termination:**
-- More destructive than suspension
-- May cause service instability
-- Easier to detect than suspension
-- Not recommended for stealth operations
-
-**Persistence Considerations:**
-- Suspended threads remain suspended until resumed
-- System reboot will restore normal operation
-- For persistent blinding, implant would need to run periodically
+**Other Test Events:**
+- User logon/logoff events
+- Process creation events
+- File access audit events
+- Registry modification events
 
 ## Detection and Mitigation
 
@@ -300,10 +326,10 @@ BOOL MonitorServiceThreads(DWORD servicePid) {
 }
 ```
 
-**Integrity Checking:**
-- Regular verification of service thread states
-- Monitoring for event log gaps and inconsistencies
-- Alerting on service manipulation attempts
+**Event Log Integrity Checking:**
+- Monitor for event log gaps and inconsistencies
+- Alert on extended periods without expected event types
+- Implement heartbeat events to detect logging failures
 
 ## Building the Project
 
@@ -328,12 +354,33 @@ compile.bat
 #pragma comment(lib,"shell32.lib")
 ```
 
+## Legal and Ethical Considerations
+
+This technique demonstrates:
+- **Windows internal service architecture** for educational purposes
+- **Advanced thread manipulation** techniques
+- **Defensive security research** for understanding advanced attacks
+
+**Important**: This technique manipulates critical system services and should only be used in controlled environments with proper authorization.
+
 ## References
 
 - Windows Internals, 7th Edition - Service Architecture
 - MITRE ATT&CK: T1562.002 (Impair Defenses: Disable Windows Event Logging)
 - Advanced threat actor techniques research
 - Windows Service Control Manager Documentation
+
+## Contributing
+
+Contributions welcome for:
+- Additional service blinding techniques
+- Enhanced detection methods
+- Cross-version Windows compatibility
+- Error handling improvements
+
+## License
+
+Educational and research purposes only. See LICENSE for details.
   
 </details>
 
