@@ -5266,7 +5266,7 @@ compile.bat
 
 <details>
 <summary>Assignment #1 - Hooks</summary>
-
+<br>
 Identify what other DLLs are hooked by Bitdefender?
 
 Create unhooking module for these libraries.
@@ -5278,8 +5278,7 @@ donate.hide01.ir
 
 <details>
 <summary>Assignment #2 - Module Stomping</summary>
-
-
+<br>
 Try to figure out why the offset of 2 * 4kB was used in this technique?
 
 Guiding questions: Can the payload be written at the beginning of windows.storage.dll? Why/why not?
