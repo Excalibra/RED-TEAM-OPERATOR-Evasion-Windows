@@ -44,7 +44,11 @@ The technique works by:
 - Open Local Security Policy (`secpol.msc`)
 - Navigate to **Local Policies** → **Audit Policy**
 - Click on **Audit system events**
+  <img width="1249" height="733" alt="image" src="https://github.com/user-attachments/assets/777b58e5-0d9f-4ef6-aa5d-8fc51e5e30be" />
+
 - Check the **Success** checkbox and click **OK**
+  <img width="1029" height="738" alt="image" src="https://github.com/user-attachments/assets/e9b5d802-0bda-4e27-a0ad-adcd6777a5cd" />
+
 - This generates audit policy change events (Event ID 4719)
 - Observe new events appearing in the custom view
 
@@ -58,6 +62,9 @@ The technique works by:
 4. Make additional policy changes to test logging
 5. **Observation**: No new events appear in Event Viewer
 6. Resume threads to see queued events flood in
+   <img width="1230" height="778" alt="image" src="https://github.com/user-attachments/assets/234ca30b-9767-4b49-b919-4534d44c11d6" />
+   <img width="1511" height="717" alt="image" src="https://github.com/user-attachments/assets/dd4aa807-6949-4eda-b00c-5ec9f7c83e6c" />
+
 
 ### Step 3: Code Implementation
 
@@ -215,6 +222,9 @@ svchost with eventlog - PID: 1234
 [!] Eventlog thread FOUND: 1228. Suspending...done!
 [!] Eventlog thread FOUND: 1232. Suspending...done!
 ```
+
+<img width="1284" height="674" alt="image" src="https://github.com/user-attachments/assets/126779cb-db49-442b-a23a-e9b59281c7d3" />
+
 
 ### Step 5: Testing Event Log Blinding
 
