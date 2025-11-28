@@ -5262,7 +5262,7 @@ compile.bat
 
 </details>
 
-<br><br>
+<br>
 
 <details>
 <summary>Assignment #1 - Hooks</summary>
