@@ -5278,6 +5278,8 @@ donate.hide01.ir
 
 <details>
 <summary>Assignment #2 - Module Stomping</summary>
+
+
 Try to figure out why the offset of 2 * 4kB was used in this technique?
 
 Guiding questions: Can the payload be written at the beginning of windows.storage.dll? Why/why not?
