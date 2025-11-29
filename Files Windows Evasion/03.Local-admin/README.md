@@ -669,6 +669,8 @@ Connected to ROOT\StandardCIMV2 namespace
 +=======+=================+===========+=================+============+
 ```
 
+<img width="1684" height="820" alt="image" src="https://github.com/user-attachments/assets/544ab8e0-34f9-4eb6-a0b0-5f472e505515" />
+
 ### Step 5: Identifying Security Agent Connections
 
 **Analysis Process:**
