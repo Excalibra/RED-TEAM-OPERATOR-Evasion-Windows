@@ -2314,7 +2314,20 @@ nslookup google.com
 ping twitter.com
 ```
 
-Confirm these activities are being logged in Event Viewer under `Applications and Services Logs > Microsoft > Windows > Sysmon > Operational`.
+<img width="1230" height="638" alt="image" src="https://github.com/user-attachments/assets/c18bf5f9-0dbf-49f2-af19-9c331b72a5fc" />
+
+<img width="1611" height="799" alt="image" src="https://github.com/user-attachments/assets/e2da3073-092a-4db1-b855-692a13ad62de" />
+
+
+Confirm these activities are being logged in Event Viewer under `Applications and Services Logs > Microsoft > Windows > OneDrv > Microsoft-Windows-Sysmon/Operational`.
+
+<img width="1610" height="801" alt="image" src="https://github.com/user-attachments/assets/42c81894-f05d-43db-96ae-3ccb561feccf" />
+
+<img width="1610" height="800" alt="image" src="https://github.com/user-attachments/assets/813d9bc1-97d1-4774-9805-66faf1d07ad6" />
+
+<img width="1613" height="803" alt="image" src="https://github.com/user-attachments/assets/6f85cbdb-49d9-4339-9929-6e77303b9513" />
+
+
 
 ### Step 2: Process Discovery
 
@@ -2389,17 +2402,6 @@ int GagSysmon(HANDLE hProc) {
 
 ### Step 6: Post-Execution Verification
 
-After running the tool, verify that logging has stopped:
-
-```cmd
-# Generate test events that should no longer be logged
-notepad.exe
-nslookup sector7.net
-ping google.com
-```
-
-Check Event Viewer - no new events should appear during the gag period.
-
 ## Building and Execution
 
 ### Compilation
@@ -2416,6 +2418,27 @@ implant.exe
 ```
 Killing Sysmon...done!
 ```
+
+<img width="1226" height="644" alt="image" src="https://github.com/user-attachments/assets/5dfff79f-9e27-482f-a6bc-d251005ba647" />
+
+<img width="1610" height="804" alt="image" src="https://github.com/user-attachments/assets/14dcd305-30dc-4b81-93dd-3b553fa90ab9" />
+
+After running the tool, verify that logging has stopped:
+
+```cmd
+# Generate test events that should no longer be logged
+notepad.exe
+nslookup google.com
+ping google.com
+```
+
+Check Event Viewer - no new events should appear during the gag period: 
+
+<img width="1338" height="136" alt="image" src="https://github.com/user-attachments/assets/d3d9700e-9ee5-45a9-b47e-f76fccfa1c53" />
+
+<img width="1615" height="808" alt="image" src="https://github.com/user-attachments/assets/640530c7-227f-421a-951c-24dd04384ba9" />
+
+
 
 ## Technical Details
 
