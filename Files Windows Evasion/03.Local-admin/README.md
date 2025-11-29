@@ -401,6 +401,8 @@ Educational and research purposes only. See LICENSE for details.
 <details>
 <summary>02 - Blocking EPP Comms-Listing Connections</summary>
 
+[03.Local-admin/02.EPP-comms/01.netprint](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/03.Local-admin/02.EPP-comms/01.netprint)
+
 ## Overview
 
 This module demonstrates programmatic enumeration of TCP network connections using Windows Management Instrumentation (WMI) to identify security agent communications without relying on detectable command-line tools. This is the foundational step for disrupting EDR/AV telemetry communications.
@@ -428,13 +430,26 @@ This module demonstrates programmatic enumeration of TCP network connections usi
 
 **Netstat Approach:**
 ```batch
+netstat -ano
+
+#or
 netstat -ano | findstr ESTABLISHED
+
+#also by PID
 ```
+
+<img width="1233" height="809" alt="image" src="https://github.com/user-attachments/assets/c8a8ae8a-2010-434e-8783-593154fba1f5" />
+
+<img width="1135" height="671" alt="image" src="https://github.com/user-attachments/assets/db172bf7-a0a0-4547-8c1d-a7fdd6153936" />
+
 
 **WMI Command-Line Approach:**
 ```batch
-wmic /namespace:\\root\standardcimv2 path MSFT_NetTCPConnection get LocalAddress,LocalPort,RemoteAddress,RemotePort,OwningProcess /format:table
+wmic /namespace:\\root\Standardcimv2 path msft_nettcpconnection get LocalAddress,localport,remoteaddress,remoteport,owningprocess
 ```
+<img width="1286" height="669" alt="image" src="https://github.com/user-attachments/assets/f7b05921-348d-4376-9109-08e576b0d038" />
+
+<img width="1269" height="433" alt="image" src="https://github.com/user-attachments/assets/5ce939af-d5ae-44f7-bf41-8804846ae174" />
 
 **Problems with Command-Line:**
 - Easily detectable by security monitoring
