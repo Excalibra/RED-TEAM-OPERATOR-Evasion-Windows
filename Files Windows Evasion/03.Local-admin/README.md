@@ -1567,25 +1567,124 @@ A comprehensive C++ implementation for detecting Sysmon (System Monitor) install
 
 This toolkit provides programmatic methods to identify the presence of Sysmon, a popular system monitoring tool often used by blue teams. The implementation uses various Windows APIs to detect Sysmon through processes, services, registry artifacts, ETW providers, and minifilter drivers, revealing where Sysmon hides in the system.
 
-## Detection Methods
+## Step-by-Step Detection Methodology
 
-### 1. Registry-Based Detection
-The primary method checks for Sysmon's event log channel in the Windows registry:
+### Step 1: Initial Process and Service Checks
 
-```cpp
-HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-Sysmon/Operational
+First, check for obvious Sysmon processes and services:
+
+```powershell
+# Check for Sysmon process
+Get-Process | Where-Object { $_.ProcessName -eq "Sysmon" }
+
+# Check for Sysmon service by description
+Get-CimInstance win32_service -Filter "Description = 'System Monitor service'"
+
+# Check for services with "sysm" in display name
+Get-Service | where-object {$_.DisplayName -like "*sysm*"}
 ```
 
-This registry key contains the owning publisher GUID, which is used to verify Sysmon's presence. This channel name is difficult to change and serves as a reliable indicator.
+### Step 2: Sysinternals EULA Check
 
-### 2. ETW Provider Enumeration
-Uses the `TdhEnumerateProviders` API to enumerate all Event Tracing for Windows (ETW) providers and match against Sysmon's known GUID, revealing the hidden ETW provider registration.
+Check if Sysmon's EULA has been accepted in the registry:
+```cmd
+reg query "HKCU\Software\Sysinternals\System Monitor"
+```
 
-### 3. Process and Service Detection
-Queries registered processes for the Sysmon ETW provider and correlates them with running processes, uncovering the actual service process even if it's renamed.
+### Step 3: ETW Provider Enumeration
 
-### 4. Minifilter Driver Detection
-(Requires elevated privileges) Enumerates minifilter drivers to detect Sysmon's kernel component, exposing where Sysmon hides in the kernel stack.
+Query ETW providers for Sysmon-related entries:
+```cmd
+logman query providers | findstr /i sysm
+```
+
+### Step 4: Registry-Based Detection (Most Reliable)
+
+#### Check Event Log Channels
+```cmd
+reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-Sysmon/Operational
+```
+
+This reveals the `OwningPublisher` GUID, which is crucial for further detection.
+
+#### Query Publisher Information
+Using the GUID found above:
+```cmd
+reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Publishers\{5770385F-C22A-43E0-BF4C-06F5698FFBD9}"
+```
+
+<img width="1230" height="643" alt="image" src="https://github.com/user-attachments/assets/5e96c452-8b69-4a6d-88dd-5d280ede54a8" />
+
+This provides three key pieces of information:
+- Whether Sysmon is enabled
+- The path to the binary
+- The provider name
+
+### Step 5: Process Identification
+
+Use Logman to query the specific provider and get the Process ID:
+```cmd
+logman query providers {5770385F-C22A-43E0-BF4C-06F5698FFBD9}
+```
+
+<img width="1228" height="645" alt="image" src="https://github.com/user-attachments/assets/0e86aed5-a970-4fbf-85f7-aea280752cca" />
+
+This returns the PID of the Sysmon service. For example, if it returns PID 2692:
+
+```cmd
+tasklist | findstr 2692
+```
+
+<img width="1225" height="643" alt="image" src="https://github.com/user-attachments/assets/73989c59-7e7f-4844-b7e9-71528018a853" />
+
+
+This reveals the actual process name, which might be disguised (e.g., `onedrv.exe` instead of `Sysmon.exe`).
+
+<img width="1233" height="641" alt="image" src="https://github.com/user-attachments/assets/927f2bc2-2040-4a9b-b949-eaee1db3195a" />
+
+
+### Step 6: Service Configuration Discovery
+
+```batch
+# verify
+C:\Windows\onedrv.exe /?
+```
+
+<img width="1228" height="641" alt="image" src="https://github.com/user-attachments/assets/b3502a53-943c-4be4-bf16-488b4fda1f79" />
+
+Once you have the service name from the process discovery, query its parameters:
+
+```cmd
+reg query "HKLM\SYSTEM\CurrentControlSet\Services\onedrv\Parameters"
+```
+
+This reveals the name of the Sysmon driver, completing the picture of where Sysmon is hiding.
+
+<img width="1265" height="156" alt="image" src="https://github.com/user-attachments/assets/212aea76-0a2f-4f71-bab1-7a6078ac1fdc" />
+
+### Step 7: Administrative Detection (Minifilter Drivers)
+
+With administrative privileges, enumerate minifilter drivers:
+```cmd
+fltmc
+fltmc instances
+```
+
+Look for Sysmon-related entries in the minifilter list. The default Sysmon altitude is 385201, but this can be changed.
+
+As you can see, there's no `onedrv` driver here, but as `ofltdrv`:
+
+<img width="1267" height="676" alt="image" src="https://github.com/user-attachments/assets/f7536316-ab9d-490b-ba38-fa937901d516" />
+
+
+## Understanding Minifilter Altitudes
+
+Minifilter drivers are organized in a chain with specific "altitudes" that determine their position in the I/O processing stack:
+
+- **What are altitudes?** Positions in the driver chain that process IRP (I/O Request Packet) packets
+- **How they work:** Each driver in the chain receives I/O requests, processes them, and passes them to the next driver
+- **Sysmon's altitude:** Default is 385201, but this can be changed during installation
+- **Importance:** Reveals where Sysmon hides in the kernel to monitor file system activity
 
 ## Code Implementation
 
@@ -1595,16 +1694,18 @@ Queries registered processes for the Sysmon ETW provider and correlates them wit
 - `Advapi32.lib` - Registry and security functions
 - `OleAut32.lib` - OLE automation
 
-### Core Functions
+### Core Detection Flow
 
-#### Main Detection Flow
+#### Main Function
 ```cpp
 int main(void) {
-    // Check for Sysmon event channel registry key
-    // Extract owning publisher GUID
-    // Search for matching ETW provider
-    // Identify associated processes
-    // Reveal hidden Sysmon components
+    // Step 1: Check Sysmon event channel registry key
+    HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-Sysmon/Operational
+    
+    // Step 2: Extract owning publisher GUID
+    // Step 3: Search for matching ETW provider using TdhEnumerateProviders
+    // Step 4: Identify associated processes and services
+    // Step 5: Reveal all hiding places
 }
 ```
 
@@ -1612,29 +1713,29 @@ int main(void) {
 ```cpp
 int FindSysmon(wchar_t * guid) {
     // Use TdhEnumerateProviders to list all ETW providers
+    // Buffer size management with reallocation
     // Compare each provider GUID against Sysmon's GUID
-    // Return provider information if match found
-    // Expose hidden ETW registrations
+    // Return detailed provider information
 }
 ```
 
-#### Process Identification
+#### Process Identification via COM
 ```cpp
 int PrintSysmonPID(wchar_t * guid) {
-    // Use COM interface to query trace data provider
-    // Get registered processes for the Sysmon provider
-    // Extract process IDs and names
-    // Uncover disguised service processes
+    // Initialize COM for performance logs and alerts
+    // Query ITraceDataProvider interface
+    // Get registered processes for Sysmon provider
+    // Extract PIDs using IValueMap enumerator
 }
 ```
 
 #### Process Name Resolution
 ```cpp
 char * FindProcName(int pid) {
-    // Create process snapshot using CreateToolhelp32Snapshot
-    // Iterate through processes to find matching PID
-    // Return process executable name
-    // Reveal the true identity of Sysmon processes
+    // Create toolhelp snapshot of all processes
+    // Iterate through PROCESSENTRY32 structures
+    // Match PID to find executable name
+    // Return actual process name even if disguised
 }
 ```
 
@@ -1651,94 +1752,72 @@ Run the compiled executable:
 implant.exe
 ```
 
-The tool will output whether Sysmon is detected and provide detailed information about where it's hiding in the system.
+The tool automates all detection steps and reveals:
+- ETW provider information and GUID
+- Process ID and actual process name
+- Service configuration details
+- Registry artifacts
+- Minifilter driver information (with admin privileges)
 
-## Alternative Detection Methods
+## Advanced Detection Techniques
 
-### PowerShell Commands
-```powershell
-# Process detection - find if Sysmon is running as a process
-Get-Process | Where-Object { $_.ProcessName -eq "Sysmon" }
+### Manual Verification Steps
 
-# Service detection - locate the hidden service
-Get-CimInstance win32_service -Filter "Description = 'System Monitor service'"
-Get-Service | where-object {$_.DisplayName -like "*sysm*"}
+1. **Cross-reference PIDs:**
+   ```cmd
+   tasklist /svc | findstr "PID_from_logman"
+   ```
 
-# Sysinternals EULA acceptance - check registry artifacts
-reg query "HKCU\Software\Sysinternals\System Monitor"
+2. **Check service dependencies:**
+   ```cmd
+   sc queryex [service_name]
+   ```
 
-# ETW Providers - find Sysmon's event tracing registration
-logman query providers | findstr /i sysm
+3. **Verify driver files:**
+   ```cmd
+   driverquery | findstr "sysmon"
+   ```
+
+### Event Log Verification
+Open Event Viewer and navigate to:
+```
+Applications and Services Logs > Microsoft > Windows > OneDrv > Microsoft-Windows-Sysmon/Operational
 ```
 
-### Administrative Detection Methods
-```cmd
-# Minifilter drivers (requires admin) - expose kernel hiding place
-fltmc
+<img width="1683" height="820" alt="image" src="https://github.com/user-attachments/assets/ca1f9bbb-8ab9-4b43-8e8f-6ce5658d4d41" />
 
-# Detailed provider information - reveal ETW configuration
-logman query providers {5770385F-C22A-43E0-BF4C-06F5698FFBD9}
 
-# Service parameters - uncover hidden service configurations
-reg query "HKLM\SYSTEM\CurrentControlSet\Services\onedrv\Parameters"
-
-# Minifilter instances (requires admin) - find all driver instances
-fltmc instances
-```
-
-## Technical Details
-
-### Where Sysmon Hides
-
-1. **Event Log Channels**: Sysmon registers specific event channels that are difficult to change
-2. **ETW Provider GUID**: The provider GUID is a reliable indicator of Sysmon presence
-3. **Service Registration**: Sysmon runs as a service with identifiable characteristics, often disguised
-4. **Minifilter Driver**: Installs a kernel-mode minifilter for system monitoring - its primary hiding place
-5. **Process Association**: Specific processes are registered to handle Sysmon events, even if renamed
-
-### Minifilter Altitude and Hiding
-Sysmon typically uses altitude 385201 for its minifilter driver, though this can be changed during installation. The altitude represents the driver's position in the I/O processing stack - this is where Sysmon hides to monitor all file system operations.
-
-### Registry Hiding Places
-- Event log channels under WINEVT registry keys
-- Service configurations in SYSTEM\CurrentControlSet\Services
-- Provider registrations that expose the monitoring infrastructure
-
-## Use Cases
-
-- Security assessments and penetration testing
-- Incident response and forensic analysis
-- Blue team tooling validation
-- Research into endpoint detection and response (EDR) evasion
-- Understanding Windows monitoring infrastructure and hiding techniques
+This provides visual confirmation of Sysmon's presence and activity.
 
 ## Detection Evasion Considerations
 
-While this tool detects standard Sysmon installations, note that advanced hiding techniques include:
-- Sysmon binary names can be changed during installation
-- Driver names and altitudes can be modified
-- Registry keys might be altered in customized deployments
-- Multiple detection methods increase reliability against hiding attempts
-- The event channel name remains one of the most difficult artifacts to change
+Sysmon can be hidden through various methods:
+- **Renamed binaries:** The executable and driver names can be changed
+- **Modified GUIDs:** Provider GUIDs can be altered in custom installations
+- **Changed altitudes:** Minifilter altitude can be different from default
+- **Registry modifications:** Keys can be moved or renamed
+
+However, the event channel name `Microsoft-Windows-Sysmon/Operational` is one of the most persistent and difficult artifacts to change completely.
 
 ## Output Interpretation
 
-The tool provides clear indicators of where Sysmon is hiding:
-- **Sysmon Detected**: Detailed information about the installation and hiding locations
-- **No Sysmon Found**: Confirmation of absence based on registry checks
-- **Process Information**: PID and name of Sysmon-related processes, even if disguised
-- **Provider Details**: ETW provider name and GUID revealing the monitoring infrastructure
-- **Kernel Components**: Minifilter driver information exposing the deepest hiding place
+The tool provides comprehensive output showing:
+- **Provider Detection:** Name, GUID, and status
+- **Process Information:** PID and actual executable name
+- **Service Details:** Configuration parameters and driver names
+- **Kernel Components:** Minifilter driver information (with admin rights)
+- **Confidence Level:** Based on multiple detection vectors
 
 ## Important Notes
 
-- Some detection methods require administrative privileges to uncover kernel-level hiding
-- Results should be correlated with multiple detection techniques to defeat hiding attempts
-- Custom Sysmon configurations may evade some detection methods but rarely all
-- The event log channel name is one of the most persistent indicators that reveals where Sysmon hides
-- Always test in controlled environments before operational use
+- **Privilege Requirements:** Some detection methods require administrative privileges
+- **Multiple Techniques:** Always use multiple detection methods for reliable results
+- **Custom Configurations:** Be aware that customized Sysmon installations may evade some detection methods
+- **Persistence:** The event log channel remains the most reliable indicator
+- **Testing:** Always validate detection methods in controlled environments
 
-This toolkit provides a comprehensive approach to detecting Sysmon installations and revealing where they hide, combining multiple detection vectors to uncover even well-concealed monitoring installations.
+This toolkit implements a comprehensive, step-by-step approach to detecting Sysmon installations, following the exact methodology demonstrated in the technical walkthrough. It uncovers Sysmon regardless of where it tries to hide in the system architecture.
+
 
 
 </details>
