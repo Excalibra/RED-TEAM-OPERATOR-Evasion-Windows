@@ -3,6 +3,8 @@
 <details>
 <summary>01 - Blinding Eventlog 2</summary>
 
+[03.Local-admin/01.BlindingEventlog](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/03.Local-admin/01.BlindingEventlog)
+
 ## Overview
 
 Event Log blinding is a technique that suspends Windows Event Log service threads to prevent security events from being recorded while maintaining the appearance of a normally running service. This method was reportedly used by advanced threat actors to avoid detection during operations.
