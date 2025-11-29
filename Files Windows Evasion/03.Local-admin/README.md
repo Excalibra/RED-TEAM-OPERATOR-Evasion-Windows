@@ -2530,7 +2530,28 @@ sc start onedrv
 - Consider combining with other techniques for layered defense evasion
 - Monitor blue team responses to gauge detection
 
-The Silent Gag technique represents a sophisticated approach to Sysmon neutralization that prioritizes stealth and minimal forensic footprint, making it ideal for red team operations where detection avoidance is critical.
-
-      
+The Silent Gag technique represents a sophisticated approach to Sysmon neutralization that prioritizes stealth and minimal forensic footprint, making it ideal for red team operations where detection avoidance is critical.      
 </details>
+
+
+
+<details>
+<summary>Assignment#3-Sysmon</summary>
+
+
+Write a small function extracting Sysmon driver name from registry using Win API (use: RegOpenKeyEx/RegGetValueA)
+
+
+</details>
+
+
+<details>
+<summary>Assignment#4-Sysmon</summary>
+
+
+Experiment with Rules value in Sysmon driver registry key. Check how changes in this value affect Sysmon logging.
+
+
+
+</details>
+
