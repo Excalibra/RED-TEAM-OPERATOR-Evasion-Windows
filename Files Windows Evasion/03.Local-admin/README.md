@@ -1276,7 +1276,28 @@ A C++ implementation for programmatically retrieving and displaying the Windows 
 
 ## Overview
 
-This guide demonstrates how to access Windows routing table information directly through the Windows API rather than using command-line utilities. It provides a programmatic approach to enumerate all routing table entries, including destination IPs, subnet masks, next hops, interface indices, route types, and protocols.
+This tool demonstrates how to access Windows routing table information directly through the Windows API rather than using command-line utilities like `route print`. It provides a programmatic approach to enumerate all routing table entries, including destination IPs, subnet masks, next hops, interface indices, route types, and protocols.
+
+## Prerequisites
+
+Before examining the routing table programmatically, you can view it using the built-in Windows command-line tool:
+
+```cmd
+route print
+
+# we could also use a quick command
+wmic path Win32_ip4routetable get
+
+# or for the full command
+wmic /namespace\\root\cimv2 path win32_ip4routetable get
+```
+
+<img width="1091" height="671" alt="image" src="https://github.com/user-attachments/assets/33fdcd4c-fc4e-4b49-8b5d-20469e28abf3" />
+
+<img width="1285" height="649" alt="image" src="https://github.com/user-attachments/assets/24968d2d-9507-4954-a483-ef9d9b813cb1" />
+
+
+This command displays the complete routing table, but our implementation provides the same information through direct API calls for integration into larger applications. We don't want to use command line tools so we will utilise some code. 
 
 ## Technical Details
 
@@ -1352,7 +1373,9 @@ Run the compiled executable without requiring elevated privileges:
 ./implant.exe
 ```
 
-The program will output the complete routing table in a formatted, readable structure.
+The program will output the complete routing table in a formatted, readable structure, providing the same information as `route print` but through programmatic access.
+
+<img width="1682" height="820" alt="image" src="https://github.com/user-attachments/assets/e357a894-5289-4880-982c-73464e9a1c12" />
 
 ## Use Cases
 
@@ -1360,6 +1383,7 @@ The program will output the complete routing table in a formatted, readable stru
 - Security auditing of system routing configurations
 - Educational purposes for understanding Windows networking internals
 - Foundation for more advanced network manipulation tools
+- Integration into larger security or network management applications
 
 ## Technical Notes
 
@@ -1367,5 +1391,9 @@ The program will output the complete routing table in a formatted, readable stru
 - IP address conversion is handled through `inet_ntoa`
 - Route types and protocols are mapped to human-readable descriptions
 - Memory is properly managed using heap allocation functions
+- No special privileges required for execution
+
+This tool serves as a building block for more advanced network security and administration utilities that require programmatic access to Windows routing information, going beyond what's available through simple command-line tools like `route print`.
+
       
 </details>
