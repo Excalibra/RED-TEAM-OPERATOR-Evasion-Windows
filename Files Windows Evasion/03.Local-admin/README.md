@@ -845,6 +845,8 @@ This module demonstrates programmatic manipulation of Windows Firewall rules to 
 2. Navigate to **Advanced Settings**
 3. Select **Outbound Rules**
 4. Observe existing rules and their configurations
+   
+   <img width="1292" height="878" alt="image" src="https://github.com/user-attachments/assets/520877d1-1ed3-4a0d-9541-5802e141413c" />
 
 **Rule Creation Process:**
 - Create rules targeting specific security agent processes
@@ -859,7 +861,7 @@ This module demonstrates programmatic manipulation of Windows Firewall rules to 
 Open **Developer Command Prompt for VS** with Administrator privileges:
 
 ```batch
-cd 03.BlockingEPPComms-Firewall
+cd 02.netblk-fw
 compile.bat
 implant.exe
 ```
@@ -1044,15 +1046,23 @@ Cleanup:
 
 ### Step 4: Running the Implant
 
+<img width="1676" height="815" alt="image" src="https://github.com/user-attachments/assets/80824b85-258d-4a5c-b8bd-16a8b2163983" />
+
 **Execute with Administrator Privileges:**
 ```batch
 implant.exe
 ```
+<img width="1678" height="814" alt="image" src="https://github.com/user-attachments/assets/6e0eaea9-72b3-48bb-8ce9-68e09807241c" />
+
+<img width="1678" height="821" alt="image" src="https://github.com/user-attachments/assets/85c5426b-0638-4062-8afc-6d2e31a7a782" />
+
 
 **Expected Output:**
 - No console output on success (silent operation)
 - Immediate termination of target process connections
 - New firewall rule visible in Windows Firewall
+
+  <img width="1679" height="823" alt="image" src="https://github.com/user-attachments/assets/9171c8eb-7650-44aa-8cf8-ee06ce6b6247" />
 
 ### Step 5: Verification and Observation
 
@@ -1061,6 +1071,10 @@ implant.exe
 2. Navigate to **Outbound Rules**
 3. Look for rule named "Windows Defender Firewall Remote Management (RPC)"
 4. Verify rule is enabled and blocking outbound traffic
+
+   <img width="1683" height="821" alt="image" src="https://github.com/user-attachments/assets/89715209-317c-4537-b49a-15d51389955a" />
+   <img width="1680" height="819" alt="image" src="https://github.com/user-attachments/assets/fc4df92c-f1f6-4000-a5be-1225065100cb" />
+
 
 **Rule Properties Verification:**
 - **Name**: Windows Defender Firewall Remote Management (RPC)
@@ -1084,11 +1098,18 @@ implant.exe
 pFwRule->put_RemoteAddresses(bstrRuleRAddrs);  // "54.0.0.0/8"
 ```
 
+<img width="1415" height="861" alt="image" src="https://github.com/user-attachments/assets/0bb62604-483f-4c2a-b159-3e133b892562" />
+
+<img width="1420" height="864" alt="image" src="https://github.com/user-attachments/assets/e4d287ac-7201-4b0c-9ad1-c9880aae24da" />
+
+
 **IP Blocking Strategy:**
 - Block entire IP ranges used by security providers
 - Use CIDR notation for network blocks
 - Combine with application blocking for comprehensive coverage
 - Multiple rules can target different IP ranges
+
+<img width="1374" height="801" alt="image" src="https://github.com/user-attachments/assets/605c5a23-d7f5-4629-856d-6f2093d035d4" />
 
 **Multiple Rule Creation:**
 ```cpp
@@ -1100,6 +1121,12 @@ BSTR bstrRuleRAddrs3 = SysAllocString(L"52.0.0.0/8");
 // Create separate rules for each IP range
 // Each rule blocks the target application to specific IP ranges
 ```
+
+<img width="1679" height="820" alt="image" src="https://github.com/user-attachments/assets/aefd9d39-1532-4f26-87f6-7b8722b747c2" />
+
+<img width="806" height="80" alt="image" src="https://github.com/user-attachments/assets/8dba56fa-e9d9-429b-bb08-b92098be023f" />
+
+<img width="813" height="115" alt="image" src="https://github.com/user-attachments/assets/cd3a8714-4f40-453e-8f0a-1c2b1877c01c" />
 
 ## Technical Deep Dive
 
