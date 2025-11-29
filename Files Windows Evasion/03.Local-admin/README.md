@@ -1264,3 +1264,108 @@ compile.bat
 
       
 </details>
+
+
+<details>
+<summary>04 - Blocking EPP Comms-Routing Table(P1)</summary>
+
+[03.Local-admin/02.EPP-comms/03.netblk-printroute](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/03.Local-admin/02.EPP-comms/03.netblk-printroute)
+
+
+A C++ implementation for programmatically retrieving and displaying the Windows IP routing table using the IP Helper API.
+
+## Overview
+
+This guide demonstrates how to access Windows routing table information directly through the Windows API rather than using command-line utilities. It provides a programmatic approach to enumerate all routing table entries, including destination IPs, subnet masks, next hops, interface indices, route types, and protocols.
+
+## Technical Details
+
+### Approach
+The implementation uses the IP Helper API (`iphlpapi.dll`) to retrieve the routing table information. This method is more efficient than WMI for this specific use case and provides direct access to the system's routing data.
+
+### Key Features
+- Retrieves the complete IP forwarding table
+- Handles dynamic memory allocation for routing table data
+- Converts IP addresses to human-readable format
+- Translates route types and protocols from numeric values to descriptive text
+- Displays comprehensive routing information including metrics and age
+
+## Code Implementation
+
+### Dependencies
+- `iphlpapi.lib` - IP Helper API library
+- `ws2_32.lib` - Winsock library for IP address conversion
+
+### Core Functionality
+
+```cpp
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#include <stdio.h>
+
+#pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "ws2_32.lib")
+
+#define MALLOC(x) HeapAlloc(GetProcessHeap(), 0, (x))
+#define FREE(x) HeapFree(GetProcessHeap(), 0, (x))
+```
+
+### Memory Management
+The code uses a two-step allocation process:
+1. Initial allocation of a standard-sized buffer
+2. Reallocation based on the actual size required if the initial buffer is insufficient
+
+### Routing Table Retrieval Process
+
+1. **Initial Allocation**: Allocate memory for the routing table structure
+2. **Size Check**: Attempt to retrieve the table, which may return an insufficient buffer error with the required size
+3. **Proper Allocation**: Reallocate memory with the correct size
+4. **Data Retrieval**: Successfully retrieve the complete routing table
+5. **Enumeration**: Iterate through all routing table entries and extract information
+
+### Data Extraction
+For each routing table entry, the following information is extracted and displayed:
+
+- **Destination IP**: The target network destination
+- **Subnet Mask**: The network mask for the route
+- **Next Hop**: The gateway address for the route
+- **Interface Index**: The network interface associated with the route
+- **Route Type**: Local vs remote routes with descriptive labels
+- **Protocol**: The routing protocol used to create the entry
+- **Age**: How long the route has been active
+- **Metric**: The cost metric for route selection
+
+## Building and Usage
+
+### Compilation
+Compile with a Windows C++ compiler that supports the Windows API:
+
+```bash
+cl implant.cpp
+```
+
+### Execution
+Run the compiled executable without requiring elevated privileges:
+
+```bash
+./implant.exe
+```
+
+The program will output the complete routing table in a formatted, readable structure.
+
+## Use Cases
+
+- Network troubleshooting and analysis
+- Security auditing of system routing configurations
+- Educational purposes for understanding Windows networking internals
+- Foundation for more advanced network manipulation tools
+
+## Technical Notes
+
+- The implementation uses `GetIpForwardTable` from the IP Helper API
+- IP address conversion is handled through `inet_ntoa`
+- Route types and protocols are mapped to human-readable descriptions
+- Memory is properly managed using heap allocation functions
+      
+</details>
