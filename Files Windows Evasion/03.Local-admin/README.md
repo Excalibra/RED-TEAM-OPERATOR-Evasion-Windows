@@ -1757,7 +1757,11 @@ The tool automates all detection steps and reveals:
 - Process ID and actual process name
 - Service configuration details
 - Registry artifacts
+  <img width="1411" height="860" alt="image" src="https://github.com/user-attachments/assets/af7fbfef-cf22-49c0-a77d-b90b10181b81" />
+  
 - Minifilter driver information (with admin privileges)
+  [03.Local-admin/03.Sysmon/02.ListMiniflt](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/03.Local-admin/03.Sysmon/02.ListMiniflt)
+  <img width="1570" height="821" alt="image" src="https://github.com/user-attachments/assets/6ccd29b9-82e3-440b-9d41-05bc157aa018" />
 
 ## Advanced Detection Techniques
 
