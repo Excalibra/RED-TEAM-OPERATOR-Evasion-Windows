@@ -5271,7 +5271,6 @@ Identify what other DLLs are hooked by Bitdefender?
 
 Create unhooking module for these libraries.
 
-donate.hide01.ir
 
 </details>
 
@@ -5286,6 +5285,5 @@ Hint: check memory layout and contents of windows.storage.dll
 
 Additional question: Why 2 * 4kB + 12 bytes and not just 2 * 4kB?
 
-donate.hide01.ir
 
 </details>
