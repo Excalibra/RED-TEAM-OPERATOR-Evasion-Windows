@@ -814,6 +814,8 @@ This module establishes the foundation for identifying security agent communicat
 <details>
 <summary>03 - Blocking EPP Comms-Firewall</summary>
 
+[03.Local-admin/02.EPP-comms/02.netblk-fw](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/03.Local-admin/02.EPP-comms/02.netblk-fw)
+
 ## Overview
 
 This module demonstrates programmatic manipulation of Windows Firewall rules to block Endpoint Protection Platform (EPP) communications, effectively disrupting telemetry and update channels for security agents like antivirus, EDR, and Sysmon.
