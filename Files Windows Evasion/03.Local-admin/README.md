@@ -1397,3 +1397,335 @@ This tool serves as a building block for more advanced network security and admi
 
       
 </details>
+
+
+<details>
+<summary>05 - Blocking EPP Comms-Routing Table(P2)</summary>
+
+[03.Local-admin/02.EPP-comms/04.netblk-route](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/03.Local-admin/02.EPP-comms/04.netblk-route)
+
+# Windows Routing Table Manipulation
+
+A C++ implementation for programmatically manipulating the Windows IP routing table to block network communications by injecting blackhole routes.
+
+## Overview
+
+This tool demonstrates how to programmatically modify the Windows routing table to disrupt network connectivity to specific targets. By injecting custom routes that redirect traffic to invalid destinations, it can effectively block communication with specific IP addresses or entire subnets.
+
+## Prerequisites
+
+- Administrator privileges are required to modify the routing table
+- Understanding of IP addressing and subnet masks
+- Careful planning to avoid disrupting essential network services
+
+## Technical Details
+
+### Approach
+The implementation uses the `CreateIpForwardEntry` function from the IP Helper API to add new routes to the system's routing table. By creating routes that point to bogus next-hop addresses through the loopback interface, traffic can be effectively blackholed.
+
+### Key Features
+- Programmatic route injection without command-line tools
+- Support for both unicast and subnet blocking
+- Configurable destination IPs and subnet masks
+- Stealthy network disruption at the routing level
+
+## Code Implementation
+
+### Dependencies
+- `iphlpapi.lib` - IP Helper API library
+- `ws2_32.lib` - Winsock library
+
+### IP Address Conversion Macro
+
+```cpp
+#define IPCONV(a,b,c,d) ((a) | ((b)&0xff)<<8 | ((c)&0xff)<<16 | ((d)&0xff)<<24)
+```
+
+This macro converts dotted-decimal IP notation to the DWORD format required by the Windows API, handling the little-endian byte ordering automatically.
+
+### Core Functionality
+
+```cpp
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#include <stdio.h>
+
+#pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "ws2_32.lib")
+```
+
+### Route Configuration Structure
+
+The `MIB_IPFORWARDROW` structure contains the following critical fields:
+
+- **dwForwardDest**: Destination IP address to block
+- **dwForwardMask**: Subnet mask defining the scope of blocking
+- **dwForwardNextHop**: Bogus gateway address for blackholing
+- **dwForwardIfIndex**: Network interface index (1 = loopback)
+- **dwForwardProto**: Routing protocol (MIB_IPPROTO_NETMGMT for static routes)
+
+## Usage Examples
+
+### Blocking a Single IP Address
+
+```cpp
+// Block Google DNS (8.8.8.8)
+pRow->dwForwardDest = (DWORD) IPCONV(8,8,8,8);
+pRow->dwForwardMask = 0xFFFFFFFF;  // 255.255.255.255 - unicast
+pRow->dwForwardNextHop = (DWORD) IPCONV(10,2,2,20);  // Bogus gateway
+```
+
+### Blocking Entire Subnets
+
+```cpp
+// Block entire 52.0.0.0/8 subnet
+pRow->dwForwardDest = (DWORD) IPCONV(52,0,0,0);
+pRow->dwForwardMask = 0x000000FF;  // 255.0.0.0 - /8 subnet
+
+// Block 54.0.0.0/16 subnet
+pRow->dwForwardDest = (DWORD) IPCONV(54,0,0,0);
+pRow->dwForwardMask = 0x0000FFFF;  // 255.255.0.0 - /16 subnet
+```
+
+<img width="1468" height="822" alt="image" src="https://github.com/user-attachments/assets/feb2a553-3fe0-4185-9f49-c2a2b8a3450e" />
+
+<img width="1474" height="823" alt="image" src="https://github.com/user-attachments/assets/86eee672-67af-4d40-9dce-7a4066267c70" />
+
+
+
+## Building and Execution
+
+<img width="1285" height="625" alt="image" src="https://github.com/user-attachments/assets/6864b0bf-523c-4840-b180-7d289f1d8496" />
+
+
+### Compilation
+```bash
+cl implant.cpp
+```
+
+### Execution
+Run with administrator privileges:
+```bash
+implant.exe
+```
+
+<img width="871" height="670" alt="image" src="https://github.com/user-attachments/assets/fc02ffd6-5404-4ed3-afd7-f61c4304d78d" />
+
+<img width="1139" height="674" alt="image" src="https://github.com/user-attachments/assets/5eeebb99-ca83-4127-bfb7-f7e510ba39cc" />
+
+
+## Operational Considerations
+
+### Security Implications
+- **Administrator Rights Required**: Route modification requires elevated privileges
+- **Persistence**: Routes remain active until system reboot or manual removal
+- **Stealth Advantage**: Routing table changes are less monitored than firewall rules
+
+### Risk Mitigation
+1. **Test Carefully**: Always test in controlled environments first
+2. **Avoid Self-Disruption**: Don't block DNS servers or gateways critical for your own connectivity
+3. **Have Recovery Plan**: Know how to remove routes manually if needed
+4. **Monitor Effects**: Use tools like Wireshark to verify the impact
+
+### Manual Route Removal
+If routes need to be removed manually, use the command line:
+```cmd
+route delete 8.8.8.8
+```
+
+## Use Cases
+
+- Security research and red team operations
+- Network isolation and segmentation testing
+- Studying Windows networking internals
+- Controlled environment testing of network-dependent applications
+
+## Technical Notes
+
+- Routes are non-persistent and will be cleared on reboot
+- The loopback interface (index 1) is used to create a local blackhole
+- Bogus next-hop addresses should be within unroutable IP space
+- Multiple routes can be added to block different targets
+- Existing connections may take time to timeout after route injection
+
+      
+</details>
+
+
+
+
+<details>
+<summary>06 - Dancing with Sysmon-Detection</summary>
+
+[03.Local-admin/03.Sysmon/01.FindSysmon/implant.cpp](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/blob/main/Files%20Windows%20Evasion/03.Local-admin/03.Sysmon/01.FindSysmon/implant.cpp)
+
+A comprehensive C++ implementation for detecting Sysmon (System Monitor) installations on Windows systems through multiple detection methodologies.
+
+## Overview
+
+This toolkit provides programmatic methods to identify the presence of Sysmon, a popular system monitoring tool often used by blue teams. The implementation uses various Windows APIs to detect Sysmon through processes, services, registry artifacts, ETW providers, and minifilter drivers.
+
+## Detection Methods
+
+### 1. Registry-Based Detection
+The primary method checks for Sysmon's event log channel in the Windows registry:
+
+```cpp
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\WINEVT\Channels\Microsoft-Windows-Sysmon/Operational
+```
+
+This registry key contains the owning publisher GUID, which is used to verify Sysmon's presence.
+
+### 2. ETW Provider Enumeration
+Uses the `TdhEnumerateProviders` API to enumerate all Event Tracing for Windows (ETW) providers and match against Sysmon's known GUID.
+
+### 3. Process and Service Detection
+Queries registered processes for the Sysmon ETW provider and correlates them with running processes.
+
+### 4. Minifilter Driver Detection
+(Requires elevated privileges) Enumerates minifilter drivers to detect Sysmon's kernel component.
+
+## Code Implementation
+
+### Dependencies
+- `tdh.lib` - Trace Data Helper library
+- `Ole32.lib` - COM services
+- `Advapi32.lib` - Registry and security functions
+- `OleAut32.lib` - OLE automation
+
+### Core Functions
+
+#### Main Detection Flow
+```cpp
+int main(void) {
+    // Check for Sysmon event channel registry key
+    // Extract owning publisher GUID
+    // Search for matching ETW provider
+    // Identify associated processes
+}
+```
+
+#### ETW Provider Enumeration
+```cpp
+int FindSysmon(wchar_t * guid) {
+    // Use TdhEnumerateProviders to list all ETW providers
+    // Compare each provider GUID against Sysmon's GUID
+    // Return provider information if match found
+}
+```
+
+#### Process Identification
+```cpp
+int PrintSysmonPID(wchar_t * guid) {
+    // Use COM interface to query trace data provider
+    // Get registered processes for the Sysmon provider
+    // Extract process IDs and names
+}
+```
+
+#### Process Name Resolution
+```cpp
+char * FindProcName(int pid) {
+    // Create process snapshot using CreateToolhelp32Snapshot
+    // Iterate through processes to find matching PID
+    // Return process executable name
+}
+```
+
+## Building and Usage
+
+### Compilation
+```bash
+cl implant.cpp
+```
+
+### Execution
+Run the compiled executable:
+```bash
+implant.exe
+```
+
+The tool will output whether Sysmon is detected and provide detailed information about the installation.
+
+## Alternative Detection Methods
+
+### PowerShell Commands
+```powershell
+# Process detection
+Get-Process | Where-Object { $_.ProcessName -eq "Sysmon" }
+
+# Service detection
+Get-CimInstance win32_service -Filter "Description = 'System Monitor service'"
+Get-Service | where-object {$_.DisplayName -like "*sysm*"}
+
+# Sysinternals EULA acceptance
+reg query "HKCU\Software\Sysinternals\System Monitor"
+
+# ETW Providers
+logman query providers | findstr /i sysm
+```
+
+### Administrative Detection Methods
+```cmd
+# Minifilter drivers (requires admin)
+fltmc
+
+# Detailed provider information
+logman query providers {5770385F-C22A-43E0-BF4C-06F5698FFBD9}
+
+# Service parameters
+reg query "HKLM\SYSTEM\CurrentControlSet\Services\onedrv\Parameters"
+
+# Minifilter instances (requires admin)
+fltmc instances
+```
+
+## Technical Details
+
+### Key Detection Points
+
+1. **Event Log Channels**: Sysmon registers specific event channels that are difficult to change
+2. **ETW Provider GUID**: The provider GUID is a reliable indicator of Sysmon presence
+3. **Service Registration**: Sysmon runs as a service with identifiable characteristics
+4. **Minifilter Driver**: Installs a kernel-mode minifilter for system monitoring
+5. **Process Association**: Specific processes are registered to handle Sysmon events
+
+### Minifilter Altitude
+Sysmon typically uses altitude 385201 for its minifilter driver, though this can be changed during installation. The altitude represents the driver's position in the I/O processing stack.
+
+## Use Cases
+
+- Security assessments and penetration testing
+- Incident response and forensic analysis
+- Blue team tooling validation
+- Research into endpoint detection and response (EDR) evasion
+- Understanding Windows monitoring infrastructure
+
+## Detection Evasion Considerations
+
+While this tool detects standard Sysmon installations, note that:
+- Sysmon binary names can be changed during installation
+- Driver names and altitudes can be modified
+- Registry keys might be altered in customized deployments
+- Multiple detection methods increase reliability
+
+## Output Interpretation
+
+The tool provides clear indicators:
+- **Sysmon Detected**: Detailed information about the installation
+- **No Sysmon Found**: Confirmation of absence based on registry checks
+- **Process Information**: PID and name of Sysmon-related processes
+- **Provider Details**: ETW provider name and GUID
+
+## Important Notes
+
+- Some detection methods require administrative privileges
+- Results should be correlated with multiple detection techniques
+- Custom Sysmon configurations may evade some detection methods
+- Always test in controlled environments before operational use
+
+This toolkit provides a comprehensive approach to detecting Sysmon installations, combining multiple detection vectors for increased reliability and accuracy.
+
+
+</details>
