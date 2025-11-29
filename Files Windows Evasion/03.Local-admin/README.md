@@ -1829,6 +1829,8 @@ This toolkit implements a comprehensive, step-by-step approach to detecting Sysm
 <details>
 <summary>07 - Dancing with Sysmon-Killem</summary>
 
+[03.Local-admin/03.Sysmon/03.UnloadFlt](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/03.Local-admin/03.Sysmon/03.UnloadFlt)
+
 A comprehensive guide to disabling or evading Sysmon monitoring through various techniques, depending on your privilege level on the target system.
 
 ## Overview
