@@ -1,6 +1,7 @@
 # RED TEAM OPERATOR Evasion Windows
 
-![image](https://github.com/user-attachments/assets/e69983f7-dbf0-474b-8580-7424940e117d)
+![image jpg](https://github.com/user-attachments/assets/9499d5de-257b-450e-9c38-026e647ef014)
+
 
 A comprehensive repository covering modern evasion techniques in Windows environments, focusing on bypassing detection technologies and enhancing operational security.
 
