@@ -12,7 +12,7 @@ This repository contains research and implementations related to Windows evasion
 ## Contents
 
 [Files Windows Evasion](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion)
-A structured guide to evasion techniques
+- A structured guide to evasion techniques
 
 [01.Essentials](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/01.Essentials)
 - 01 - Modern Detection Technology
