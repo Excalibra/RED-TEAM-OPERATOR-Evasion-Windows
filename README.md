@@ -54,35 +54,64 @@ This repository contains research and implementations related to Windows evasion
 
 ## Techniques
 
-### Core Evasion Concepts
+<details>
+<summary>Core Evasion Concepts</summary>
+  <br>
+  
 - **Detection Technology Analysis**: Understanding modern detection systems, their structure, and vulnerabilities
 - **Evasion Development Principles**: Foundational rules for creating effective evasion techniques
 
-### Binary Obfuscation
+</details>
+<details>
+  
+<summary>Binary Obfuscation</summary>
+<br>
+
 - **Digital Signature Spoofing**: Making binaries appear as legitimate signed applications
 - **Module Information Manipulation**: Modifying binary metadata to resemble ordinary images
 - **Entropy Management**: Comprehensive analysis of entropy and its application in evasion
 
-### API Hooking & System Calls
+</details>
+<details>
+
+  <summary>API Hooking & System Calls</summary>
+<br>
+
 - **API Hook Detection and Removal**: Identifying and eliminating process hooks
 - **Direct System Calls**: Bypassing user-mode hooks through direct system call invocation
 - **Event Tracing for Windows (ETW)**: Techniques for evading ETW monitoring
 - **Process Patching**: Modifying running processes to remove monitoring capabilities
 
-### Code Execution Techniques
+</details>
+<details>
+
+  <summary>Code Execution Techniques</summary>
+<br>
+
 - **Module Stomping**: Advanced code injection without creating new modules
 - **Threadless Execution**: Launching payloads without spawning new threads
 - **Process Spoofing**: Manipulating parent process identification
 - **Dynamic Argument Modification**: Altering process arguments during execution
 
-### Privileged Operations
+</details>
+<details>
+
+  <summary>Privileged Operations</summary>
+<br>
+
 - **Event Log Manipulation**: Techniques for blinding Windows event logs
 - **Security Agent Communication Disruption**: Breaking network channels between local security agents and external logging systems
 - **Sysmon Evasion**: Advanced techniques for avoiding Microsoft Sysmon detection
 
-### Operational Guidance
+</details>
+<details>
+
+<summary>Operational Guidance</summary>
+<br>
+
 - **Evasion Decision Making**: Strategic considerations for implementing evasion during engagements
 
+</details>
 
 ## Technical Approach
 
