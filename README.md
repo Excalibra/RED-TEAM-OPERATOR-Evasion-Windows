@@ -9,6 +9,49 @@ A comprehensive repository covering modern evasion techniques in Windows environ
 
 This repository contains research and implementations related to Windows evasion methodologies used in red team operations. The material explores detection technology weaknesses and practical techniques to avoid detection while maintaining payload execution capabilities.
 
+## Contents
+
+[Files Windows Evasion](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion)
+A structured guide to evasion techniques
+
+[01.Essentials](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/01.Essentials)
+- 01 - Modern Detection Technology
+- 02 - Evasion Development Rules
+- 03 - Binary Entropy in Malware Detection
+- 04 - Module Details Obfuscation
+- 05 - Binary Signature
+
+[02.Usage Guide for Non-privileged User Vector (Non-admin)](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/02.Non-admin)
+- 01 - Process Unhooking - Introduction
+- 02 - Hooks vs Code Injections
+- 03 - Process Unhooking Classic Method
+- 04 - Hooks vs Hells Gate
+- 05 - Hooks vs Halo Gate
+- 06 - Process Unhooking Peruns Fart
+- 07 - Silencing Process Event Tracing
+- 08 - Module Stomping
+- 09 - No-New-Thread Payload Execution
+- 10 - Classic PPID Spoofing
+- 11 - Changing Parents Scheduler
+- 12 - Changing Parents Emotet Method
+- 13 - Cmdline Arguments Spoofing
+- Assignment #1 - Hooks
+- Assignment #2 - Module Stomping
+
+
+[03.Usage Guide for High-privileged user vector (Local-admin)](https://github.com/Excalibra/RED-TEAM-OPERATOR-Evasion-Windows/tree/main/Files%20Windows%20Evasion/03.Local-admin)
+- 01 - Blinding Eventlog 2
+- 02 - Blocking EPP Comms-Listing Connections
+- 03 - Blocking EPP Comms-Firewall
+- 04 - Blocking EPP Comms-Routing Table(P1)
+- 05 - Blocking EPP Comms-Routing Table(P2)
+- 06 - Dancing with Sysmon-Detection
+- 07 - Dancing with Sysmon-Killem
+- 08 - Dancing with Sysmon-Silent Gag
+- Assignment#3-Sysmon
+- Assignment#4-Sysmon
+
+
 ## Techniques
 
 ### Core Evasion Concepts
